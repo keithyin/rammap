@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>diagonal_filter 交互式讲解 — 对角线直方图 top-K anchor 过滤</title>
+<style>
+  :root {
+    --fg: #1e293b; --muted: #64748b; --line: #e2e8f0; --bg: #f8fafc;
+    --blue: #2563eb; --red: #e11d48; --green: #16a34a; --amber: #d97706; --gray: #cbd5e1;
+    --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+         color: var(--fg); background: var(--bg); line-height: 1.65; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 24px 20px 80px; }
+  header { border-bottom: 2px solid var(--fg); padding-bottom: 14px; margin-bottom: 22px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 14px; }
+  code { background: #eef2f7; border-radius: 4px; padding: 1px 6px; font-size: 13px;
+         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .formula { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--green);
+             border-radius: 8px; padding: 12px 18px; margin: 14px 0; font-size: 15px; }
+  h2 { font-size: 19px; margin: 34px 0 10px; }
+  h3 { font-size: 15px; margin: 18px 0 6px; }
+  p { margin: 8px 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .muted { color: var(--muted); }
+  small.muted { font-size: 12.5px; }
+
+  /* 控制条 */
+  .controls { position: sticky; top: 0; z-index: 10; background: rgba(248,250,252,.96);
+              border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+              display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; backdrop-filter: blur(4px); }
+  .ctl { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .ctl label { color: var(--muted); white-space: nowrap; }
+  .ctl .val { min-width: 34px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 110px; accent-color: var(--green); }
+  select { font: inherit; font-size: 13px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
+  button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--line);
+           background: #fff; cursor: pointer; }
+  button:hover { border-color: var(--green); color: var(--green); }
+  button.primary { background: var(--green); border-color: var(--green); color: #fff; }
+  button.primary:hover { filter: brightness(1.06); color: #fff; }
+  .badge { font-size: 12px; background: #fef3c7; color: #92400e; border-radius: 6px; padding: 2px 8px; }
+
+  /* 可视化区 */
+  .viz-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 16px; }
+  .viz-box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; position: relative; }
+  canvas { display: block; cursor: crosshair; }
+  .tip { position: absolute; pointer-events: none; background: #0f172a; color: #f1f5f9; font-size: 12px;
+         border-radius: 6px; padding: 6px 9px; opacity: 0; transition: opacity .08s; max-width: 260px; z-index: 5; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  /* 统计 */
+  table.stats { border-collapse: collapse; width: 100%; font-size: 13.5px; background: var(--card);
+                border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  table.stats th, table.stats td { border-bottom: 1px solid var(--line); padding: 7px 12px; text-align: right;
+                font-variant-numeric: tabular-nums; }
+  table.stats th:first-child, table.stats td:first-child { text-align: left; }
+  table.stats th { background: #f1f5f9; color: var(--muted); font-weight: 600; }
+  td.delta-down { color: var(--green); font-weight: 600; }
+  td.delta-bad { color: var(--red); font-weight: 600; }
+  .hint { border-radius: 8px; padding: 10px 14px; font-size: 14px; margin-top: 12px; display: none; }
+  .hint.ok { display: block; background: #f0fdf4; border: 1px solid #bbf7d0; color: #14532d; }
+  .hint.warn { display: block; background: #fef2f2; border: 1px solid #fecaca; color: #7f1d1d; }
+
+  /* 步骤卡 */
+  .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  @media (max-width: 900px) { .steps { grid-template-columns: 1fr 1fr; } }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+  .step b { color: var(--green); }
+  .step .live { margin-top: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>diagonal_filter：对角线直方图 top-K anchor 过滤</h1>
+  <div class="sub">挂在 anchor 构建之后、DP 链化之前 · 原型见 <code>prototype/diag_topk.py</code> ·
+    本页数据由该原型导出（合成靶序列 100 kb，seed=0，k=15，w=5），链化为同一原型的 JS 移植</div>
+</header>
+
+<section>
+  <h2>一、核心几何直觉</h2>
+  <p>共线比对有一个刚性性质：<b>所有真 anchor 落在同一条对角线附近</b>。给每个 anchor 定义对角线坐标：</p>
+  <div class="formula">
+    <code>d = r − q</code>&nbsp;&nbsp;（query 位置已在 anchor 构建时按链方向镜像，正/负链公式相同）
+  </div>
+  <ul>
+    <li>read 相对 target 的 <b>indel 让 d 沿链缓慢漂移</b>，但漂移被 <code>bw(500)</code> 约束；</li>
+    <li>噪声 anchor（重复 k-mer 的错位命中）的 <b>d 均匀散布</b>在整个值域 (−qlen, +tlen) 上；</li>
+    <li>所以：<b>真链 = 对角线上的峰，噪声 = 对角线背景</b>。分桶计数后，真链就是直方图里拔尖的柱子。</li>
+  </ul>
+  <p class="muted">直觉实验（文档实测）：最优链 238 个 anchor 的 d 全部落在 [−40, +36]，集中在 2 个 50 bp 桶；而全部 646 个正链 anchor 散布在几十个桶上，top-5 桶只覆盖 63%。</p>
+</section>
+
+<section>
+  <h2>二、交互演示：从 anchor 到被过滤的 DP</h2>
+  <p class="muted">下面左侧是 anchor 的 (q, r) 散点图（4 条真实导出的 read），绿色斜带 = 入选的对角线桶；
+    右侧是 d 直方图，<b>选中的绿柱与左图绿带一一对应</b>。悬停可查看每个 anchor 的坐标与去留，点击直方图柱子可手动增删选桶。</p>
+
+  <div class="controls">
+    <div class="ctl"><label>read</label>
+      <select id="selRead"></select></div>
+    <div class="ctl"><label>链位</label>
+      <select id="selStrand">
+        <option value="0">全部</option>
+        <option value="1">正链 (+)</option>
+        <option value="-1">负链 (−)</option>
+      </select></div>
+    <div class="ctl"><label>桶宽 B</label>
+      <input type="range" id="rgB" min="20" max="200" step="10" value="100">
+      <span class="val" id="vB">100</span></div>
+    <div class="ctl"><label>top-K</label>
+      <input type="range" id="rgK" min="1" max="4" step="1" value="2">
+      <span class="val" id="vK">2</span></div>
+    <div class="ctl"><label>邻桶 ±</label>
+      <input type="range" id="rgNb" min="0" max="2" step="1" value="1">
+      <span class="val" id="vNb">1</span></div>
+    <div class="ctl"><label>选峰</label>
+      <select id="selMode">
+        <option value="topk">top-K</option>
+        <option value="adaptive">覆盖率自适应 (80%)</option>
+      </select></div>
+    <div class="ctl"><label><input type="checkbox" id="ckDropped" checked> 显示被丢弃 anchor</label></div>
+    <div class="ctl"><label><input type="checkbox" id="ckBase" checked> 基线最优链</label></div>
+    <div class="ctl"><label><input type="checkbox" id="ckFocus" checked> 直方图聚焦峰区</label></div>
+    <button class="primary" id="btnK1">K=1 失败演示</button>
+    <button id="btnReset">重置参数</button>
+    <button id="btnAuto" style="display:none">清除手动选桶</button>
+    <span class="badge" id="manualBadge" style="display:none">手动模式</span>
+  </div>
+
+  <div class="viz-row">
+    <div class="viz-box">
+      <canvas id="cvScatter" width="660" height="440"></canvas>
+      <div class="tip" id="tipScatter"></div>
+      <div class="muted" style="font-size:12.5px; margin-top:4px">anchor 散点 (q, r) —— 绿色粗线 = 入选对角线桶（线宽 ∝ 桶宽 B），折线为链</div>
+    </div>
+    <div class="viz-box">
+      <canvas id="cvHist" width="300" height="440"></canvas>
+      <div class="tip" id="tipHist"></div>
+      <div class="muted" style="font-size:12.5px; margin-top:4px">d = r − q 直方图（点击柱子手动增删选桶）</div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="sw" style="background:var(--blue)"></span>保留 · 正链</span>
+    <span><span class="sw" style="background:var(--red)"></span>保留 · 负链</span>
+    <span><span class="sw" style="background:var(--gray)"></span>被丢弃 anchor</span>
+    <span><span class="sw" style="background:rgba(22,163,74,.4)"></span>入选对角线桶（含 ±邻桶）</span>
+    <span><span class="sw" style="background:var(--green)"></span>过滤后最优链</span>
+    <span><span class="sw" style="background:var(--amber)"></span>过滤后次优链（MAPQ 来源）</span>
+    <span><span class="sw" style="background:#94a3b8"></span>基线最优链（虚线）</span>
+  </div>
+
+  <h3>量化对比</h3>
+  <table class="stats" id="statsTable">
+    <thead><tr><th>指标</th><th>基线（不过滤）</th><th>对角线过滤后</th><th>Δ</th></tr></thead>
+    <tbody id="statsBody"></tbody>
+  </table>
+  <div class="hint" id="hintBox"></div>
+
+  <h3>五步管线（当前值实时更新）</h3>
+  <div class="steps">
+    <div class="step"><b>① 计算</b><br>对每个 anchor 算 d = r − q，按链位分两组
+      <div class="live" id="live1"></div></div>
+    <div class="step"><b>② 分桶计数</b><br>b = floor(d / B)，一次 O(n_a) 遍历
+      <div class="live" id="live2"></div></div>
+    <div class="step"><b>③ 选峰</b><br>每链位取计数 top-K 桶（或覆盖率自适应）
+      <div class="live" id="live3"></div></div>
+    <div class="step"><b>④ 过滤</b><br>只保留入选桶（±邻桶）内的 anchor
+      <div class="live" id="live4"></div></div>
+    <div class="step"><b>⑤ 照常继续</b><br>radix sort → DP 链化，管线其余不动
+      <div class="live" id="live5"></div></div>
+  </div>
+</section>
+
+<section>
+  <h2>三、为什么能缓解：同时打掉两层乘子</h2>
+  <p>链化工作量 ≈ <b>anchor 密度</b>（×3.3） × <b>每锚扫描步数</b>（×3.5，skip 计数被稀释）≈ 11 倍。对角线过滤是唯一<b>同时攻击两个乘子</b>的手段：</p>
+  <div class="grid2">
+    <div class="card">
+      <h3>乘子 ①：密度</h3>
+      <p>示例 read 652 → 313 个 anchor（−52%）；61 条 read 合计 31,442 → 17,977（−43%）。进入 DP 窗口的候选直接变少。</p>
+    </div>
+    <div class="card">
+      <h3>乘子 ②：散布</h3>
+      <p>被丢弃的正是 query 倒挂（MIN 制造者）与前驱稀疏（no-effect 制造者）的离群 anchor。留下的 anchor 方向一致、前驱互相链接，<b>visited 命中率恢复 → skip-break 提前触发</b>。实测每 anchor 扫描步数 88 → 29.8，几乎回到干净数据的 25 步水平。相乘后总扫描 57,500 → 9,337（−84%）。</p>
+    </div>
+  </div>
+  <p class="muted">在下面的演示里可以验证乘子 ②：拖动 B/K 观察「scan/anchor」一列——如果过滤只是线性少了一半 anchor，scan/anchor 应不变；实际它会一起下降。</p>
+</section>
+
+<section>
+  <h2>四、与频率过滤（mid_occ / −f）的正交互补</h2>
+  <table class="stats">
+    <thead><tr><th></th><th>判别信号</th><th>能做</th><th>不能做</th></tr></thead>
+    <tbody>
+      <tr><td>频率过滤<br>(mid_occ/−f)</td><td>seed 的<b>全局命中次数</b></td>
+          <td>杀高频重复种子</td>
+          <td>occ=1 的种子无法判断——一个唯一种子的命中既可能是真比对，也可能是随机噪声</td></tr>
+      <tr><td><b>对角线过滤</b></td><td>anchor 的<b>本次比对位置一致性</b></td>
+          <td>occ=1 的噪声 anchor 只要不在峰对角线上照样被杀；occ=14 的种子只要真命中在峰上，14 个真 anchor 全保留</td>
+          <td>完全 off-diagonal 的真实多位点比对（重复区）需要多峰保留</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">实测对照：−f 0.01 只砍掉 32% anchor（只能动高频种子），对角线 K=3 砍掉 46% 且不伤真链。选择 read <b>#47（重复区多对角线）</b>可以直观看到：高频种子在重复区的多个真命中会形成多条对角线峰，top-K 把它们全部保留为次优链（MAPQ 来源）。</p>
+</section>
+
+<section>
+  <h2>五、设计参数与失败模式</h2>
+  <ul>
+    <li><b>桶宽 B（最敏感）</b>：真链 d 随 indel 漂移（示例 read 1.7 kb 漂 76 bp，横跨 2 个桶）。B 太小 → 真链被拆进多个桶、部分桶落选 → 丢真 anchor。<b>把 K 调到 1、B 调小，选 read #5，即可现场复现 recall 崩掉</b>（0.97 → 0.40）。建议 B ≈ 50–100 bp 并随 bw 缩放，或保留峰桶 ±1 邻桶；真实 subread（10–15% 错误率）漂移更大，B 要相应加宽。</li>
+    <li><b>K 不能取 1</b>：draft 里的重复区意味着 read 可能真有两个比对位点，次优链是 MAPQ（s2 tag）的来源，全杀会把重复区 MAPQ 虚抬到 60。更稳健的是覆盖率自适应：按计数降序累加桶，直到覆盖该链位 anchor 的 ~80% 或计数低于阈值。</li>
+    <li><b>失败模式兜底</b>：read 不比对 → 峰桶全是噪声，过滤无益也无害；read 有大缺失（对角线跳变 &gt; B）→ 真链横跨多个桶，各桶有人气都会入选——这正是用「直方图」而不是「单一 d̂ 估计」的好处；防误杀兜底：过滤后最优链分数骤降（&lt; 原值 60%）→ 用未过滤 anchor 重链化（可复用 rammap 已有的 high-occ re-chain 机制）。</li>
+    <li><b>为什么不是 per-seed topN</b>：按 ref 位置取前 N（N=2）最优链掉到 937/205——种子的真命中不一定排在 ref 位置靠前的 N 个里。<b>对角线是唯一与「正确性」相关且不依赖任何先验偏移量的排序信号</b>（|r−q| 版本内嵌了 offset≈0 假设，只在 target≈read 长度时成立）。</li>
+  </ul>
+</section>
+
+<footer>
+  数据与算法来源：<code>prototype/diag_topk.py</code>（anchor 导出，ChainingParams: bw=500, min_cnt=3, min_sc=40, skip=25, iter=50, pen_gap=0.5, pen_skip=0.05）；
+  本页 JS 中的过滤与 DP 链化为该原型的等价移植，交互中的所有数字均在浏览器内实时计算。
+</footer>
+
+</div>
+
+<script>
+const DATA = {"k":15,"reads":[{"id":5,"qlen":1549,"truth":[8272,9972],"note":"K=1 \u5931\u8d25\u6f14\u793a\uff1a\u771f\u94fe\u8de8\u591a\u4e2a\u6876\uff0cK=1 \u53ea\u7559\u534a\u4e2a\u94fe\uff08recall 0.97\u21920.40\uff09","anchors":[[8285,13,1],[8287,15,1],[8288,16,1],[8330,58,1],[32457,58,1],[34551,58,1],[57113,58,1],[66182,58,1],[8334,62,1],[32461,62,1],[34555,62,1],[8336,64,1],[32463,64,1],[34557,64,1],[8395,123,1],[34616,123,1],[57178,123,1],[66247,123,1],[68213,123,1],[8418,144,1],[32545,144,1],[34639,144,1],[57201,144,1],[66270,144,1],[8419,145,1],[32546,145,1],[34640,145,1],[57202,145,1],[66271,145,1],[8421,147,1],[32548,147,1],[34642,147,1],[57204,147,1],[66273,147,1],[8691,420,1],[8761,485,1],[8802,527,1],[8803,528,1],[8841,565,1],[8843,567,1],[8847,571,1],[8848,572,1],[8850,574,1],[8853,577,1],[8920,644,1],[25734,644,1],[69275,644,1],[73397,644,1],[92729,644,1],[8925,649,1],[25739,649,1],[69280,649,1],[73402,649,1],[92734,649,1],[8978,703,1],[9025,749,1],[25839,749,1],[55344,749,1],[69380,749,1],[73502,749,1],[9030,754,1],[25844,754,1],[55349,754,1],[73507,754,1],[9254,826,1],[9255,827,1],[9256,828,1],[9261,833,1],[9322,895,1],[20661,895,1],[24709,895,1],[66764,895,1],[9323,896,1],[12430,896,1],[20662,896,1],[24710,896,1],[66765,896,1],[9324,897,1],[12431,897,1],[20663,897,1],[24711,897,1],[66766,897,1],[9329,902,1],[12436,902,1],[20668,902,1],[24716,902,1],[66771,902,1],[9334,907,1],[12441,907,1],[20673,907,1],[66776,907,1],[9444,1017,1],[9494,1068,1],[66936,1068,1],[9645,1219,1],[12752,1219,1],[20984,1219,1],[25032,1219,1],[71470,1219,1],[77115,1219,1],[9650,1224,1],[12757,1224,1],[20989,1224,1],[25037,1224,1],[67092,1224,1],[71475,1224,1],[77120,1224,1],[9671,1245,1],[21010,1245,1],[25058,1245,1],[67113,1245,1],[71496,1245,1],[77141,1245,1],[9674,1248,1],[21013,1248,1],[25061,1248,1],[67116,1248,1],[71499,1248,1],[9678,1252,1],[21017,1252,1],[25065,1252,1],[67120,1252,1],[71503,1252,1],[9680,1254,1],[21019,1254,1],[25067,1254,1],[67122,1254,1],[9681,1255,1],[21020,1255,1],[25068,1255,1],[67123,1255,1],[9685,1259,1],[9687,1261,1],[9688,1262,1],[9693,1267,1],[9695,1269,1],[9732,1306,1],[12839,1306,1],[25119,1306,1],[67174,1306,1],[77202,1306,1],[9737,1311,1],[12844,1311,1],[25124,1311,1],[67179,1311,1],[71562,1311,1],[77207,1311,1],[9740,1314,1],[12847,1314,1],[21079,1314,1],[25127,1314,1],[67182,1314,1],[71565,1314,1],[77210,1314,1],[12850,1317,1],[21082,1317,1],[25130,1317,1],[67185,1317,1],[71568,1317,1],[9761,1335,1],[12868,1335,1],[21100,1335,1],[25148,1335,1],[67203,1335,1],[71586,1335,1],[25192,1380,1],[67247,1380,1],[71630,1380,1],[9806,1381,1],[9811,1386,1],[9813,1388,1],[9814,1389,1],[9819,1394,1],[9821,1396,1],[21160,1396,1],[25208,1396,1],[71646,1396,1],[77291,1396,1],[9822,1397,1],[21161,1397,1],[25209,1397,1],[71647,1397,1],[77292,1397,1],[9827,1402,1],[21166,1402,1],[25214,1402,1],[71652,1402,1],[77297,1402,1],[9902,1478,1],[16212,1478,1],[49696,1478,1],[62452,1478,1],[87152,1478,1],[9904,1480,1],[16214,1480,1],[49698,1480,1],[61838,1480,1],[62454,1480,1],[87154,1480,1],[9908,1484,1],[16218,1484,1],[49702,1484,1],[62458,1484,1],[87158,1484,1],[9913,1489,1],[16223,1489,1],[87163,1489,1],[9914,1490,1],[16224,1490,1],[87164,1490,1],[9919,1495,1],[16229,1495,1],[87169,1495,1],[9921,1497,1],[16231,1497,1],[61855,1497,1],[87171,1497,1],[9922,1498,1]]},{"id":21,"qlen":1581,"truth":[63485,65185],"note":"K=1 \u5931\u8d25\u6f14\u793a\uff08\u53e6\u4e00\u4f8b\uff0c258 anchors\uff09","anchors":[[63504,18,1],[63508,22,1],[63512,26,1],[63513,27,1],[63517,31,1],[63566,81,1],[63568,83,1],[63608,123,1],[63610,125,1],[63612,127,1],[63778,294,1],[63783,299,1],[63785,301,1],[63790,306,1],[63792,308,1],[63797,313,1],[63798,314,1],[63803,319,1],[63805,321,1],[63810,326,1],[63812,328,1],[63815,331,1],[63820,336,1],[63821,337,1],[4166,340,1],[63824,340,1],[10096,355,1],[47716,355,1],[57975,355,1],[63955,355,1],[84925,355,1],[10097,356,1],[47717,356,1],[57976,356,1],[63956,356,1],[84926,356,1],[10099,358,1],[47719,358,1],[57978,358,1],[63958,358,1],[84928,358,1],[47721,360,1],[57980,360,1],[63960,360,1],[84930,360,1],[47722,361,1],[57981,361,1],[63961,361,1],[81217,361,1],[84931,361,1],[63962,362,1],[15617,465,1],[64067,465,1],[10212,469,1],[15621,469,1],[47832,469,1],[64071,469,1],[85041,469,1],[10215,472,1],[15624,472,1],[47835,472,1],[64074,472,1],[85044,472,1],[15626,474,1],[47837,474,1],[64076,474,1],[85046,474,1],[64081,479,1],[64082,480,1],[85068,496,1],[85071,499,1],[85072,500,1],[4538,595,1],[10337,595,1],[47957,595,1],[58216,595,1],[64196,595,1],[81452,595,1],[85166,595,1],[10338,596,1],[47958,596,1],[58217,596,1],[64197,596,1],[81453,596,1],[85167,596,1],[10343,601,1],[58222,601,1],[64202,601,1],[81458,601,1],[85172,601,1],[10347,605,1],[58226,605,1],[64206,605,1],[81462,605,1],[85176,605,1],[4720,780,1],[15928,780,1],[58398,780,1],[64378,780,1],[81634,780,1],[4721,781,1],[15929,781,1],[64379,781,1],[355,843,1],[64443,843,1],[89368,843,1],[93728,843,1],[360,848,1],[64448,848,1],[89373,848,1],[93733,848,1],[361,849,1],[64449,849,1],[89374,849,1],[93734,849,1],[363,851,1],[64451,851,1],[89376,851,1],[93736,851,1],[364,852,1],[64452,852,1],[89377,852,1],[93737,852,1],[93868,981,1],[93873,986,1],[93875,988,1],[93880,993,1],[93883,996,1],[645,1129,1],[50739,1129,1],[62811,1129,1],[64733,1129,1],[89658,1129,1],[94018,1129,1],[650,1134,1],[50744,1134,1],[62816,1134,1],[64738,1134,1],[89663,1134,1],[94023,1134,1],[62835,1153,1],[64757,1153,1],[62840,1158,1],[64762,1158,1],[50806,1194,1],[62878,1194,1],[64800,1194,1],[89725,1194,1],[94085,1194,1],[64816,1210,1],[64821,1215,1],[89746,1215,1],[64826,1220,1],[64827,1221,1],[766,1248,1],[50860,1248,1],[64854,1248,1],[89779,1248,1],[767,1249,1],[50861,1249,1],[64855,1249,1],[89780,1249,1],[772,1254,1],[50866,1254,1],[64860,1254,1],[89785,1254,1],[94145,1254,1],[773,1255,1],[50867,1255,1],[64861,1255,1],[89786,1255,1],[94146,1255,1],[778,1260,1],[50872,1260,1],[64866,1260,1],[89791,1260,1],[94151,1260,1],[816,1298,1],[818,1300,1],[819,1301,1],[50913,1301,1],[62985,1301,1],[64907,1301,1],[94192,1301,1],[823,1305,1],[62989,1305,1],[64911,1305,1],[826,1308,1],[21229,1308,1],[62992,1308,1],[64914,1308,1],[827,1309,1],[21230,1309,1],[62993,1309,1],[64915,1309,1],[830,1312,1],[21233,1312,1],[62996,1312,1],[64918,1312,1],[832,1314,1],[21235,1314,1],[62998,1314,1],[64920,1314,1],[89845,1314,1],[21273,1352,1],[63036,1352,1],[64958,1352,1],[21276,1355,1],[63039,1355,1],[64961,1355,1],[94246,1355,1],[892,1374,1],[21295,1374,1],[63058,1374,1],[64980,1374,1],[89905,1374,1],[893,1375,1],[21296,1375,1],[63059,1375,1],[64981,1375,1],[89906,1375,1],[894,1376,1],[21297,1376,1],[63060,1376,1],[64982,1376,1],[89907,1376,1],[895,1377,1],[21298,1377,1],[63061,1377,1],[64983,1377,1],[89908,1377,1],[900,1382,1],[21303,1382,1],[63066,1382,1],[64988,1382,1],[94273,1382,1],[94356,1466,1],[94357,1467,1],[998,1481,1],[13057,1481,1],[63164,1481,1],[90011,1481,1],[1003,1486,1],[13062,1486,1],[63169,1486,1],[90016,1486,1],[1004,1487,1],[13063,1487,1],[21407,1487,1],[51098,1487,1],[63170,1487,1],[90017,1487,1],[94377,1487,1],[65096,1491,1],[65097,1492,1],[65101,1496,1],[65105,1500,1],[65106,1501,1]]},{"id":47,"qlen":1501,"truth":[97031,98731],"note":"\u91cd\u590d\u533a\u591a\u5bf9\u89d2\u7ebf\uff1aanchor \u6700\u591a\uff08634\uff09\uff0c\u5c55\u793a\u591a\u5cf0\u4fdd\u7559\u4e0e\u6b21\u4f18\u94fe","anchors":[[97033,2,1],[97052,21,1],[97053,22,1],[97055,24,1],[97089,59,1],[97092,62,1],[97111,81,1],[97114,84,1],[97115,85,1],[97120,90,1],[97123,93,1],[97141,111,1],[97159,130,1],[97160,131,1],[97165,136,1],[97166,137,1],[97169,140,1],[97172,143,1],[97177,148,1],[97200,170,1],[97220,190,1],[97221,191,1],[97223,193,1],[97226,196,1],[97230,200,1],[97233,203,1],[97501,274,1],[97801,274,1],[98101,274,1],[98401,274,1],[98701,274,1],[99001,274,1],[99301,274,1],[99601,274,1],[97546,317,1],[97846,317,1],[98146,317,1],[98446,317,1],[98746,317,1],[99046,317,1],[99346,317,1],[99646,317,1],[97583,356,1],[97883,356,1],[98183,356,1],[98483,356,1],[98783,356,1],[99083,356,1],[99383,356,1],[99683,356,1],[97587,360,1],[97887,360,1],[98187,360,1],[98487,360,1],[98787,360,1],[99087,360,1],[99387,360,1],[99687,360,1],[97371,443,1],[97671,443,1],[97971,443,1],[98271,443,1],[98571,443,1],[98871,443,1],[99171,443,1],[99471,443,1],[97372,444,1],[97672,444,1],[97972,444,1],[98272,444,1],[98572,444,1],[98872,444,1],[99172,444,1],[99472,444,1],[97389,462,1],[97689,462,1],[97989,462,1],[98289,462,1],[98589,462,1],[98889,462,1],[99189,462,1],[99489,462,1],[97394,467,1],[97694,467,1],[97994,467,1],[98294,467,1],[98594,467,1],[98894,467,1],[99194,467,1],[99494,467,1],[97421,493,1],[97721,493,1],[98021,493,1],[98321,493,1],[98621,493,1],[98921,493,1],[99221,493,1],[99521,493,1],[97453,524,1],[97753,524,1],[98053,524,1],[98353,524,1],[98653,524,1],[98953,524,1],[99253,524,1],[99553,524,1],[97457,528,1],[97757,528,1],[98057,528,1],[98357,528,1],[98657,528,1],[98957,528,1],[99257,528,1],[99557,528,1],[97460,531,1],[97760,531,1],[98060,531,1],[98360,531,1],[98660,531,1],[98960,531,1],[99260,531,1],[99560,531,1],[97494,565,1],[97794,565,1],[98094,565,1],[98394,565,1],[98694,565,1],[98994,565,1],[99294,565,1],[99594,565,1],[97497,568,1],[97797,568,1],[98097,568,1],[98397,568,1],[98697,568,1],[98997,568,1],[99297,568,1],[99597,568,1],[97501,572,1],[97801,572,1],[98101,572,1],[98401,572,1],[98701,572,1],[99001,572,1],[99301,572,1],[99601,572,1],[97503,574,1],[97803,574,1],[98103,574,1],[98403,574,1],[98703,574,1],[99003,574,1],[99303,574,1],[99603,574,1],[97507,578,1],[97807,578,1],[98107,578,1],[98407,578,1],[98707,578,1],[99007,578,1],[99307,578,1],[99607,578,1],[97512,583,1],[97812,583,1],[98112,583,1],[98412,583,1],[98712,583,1],[99012,583,1],[99312,583,1],[99612,583,1],[97517,588,1],[97817,588,1],[98117,588,1],[98417,588,1],[98717,588,1],[99017,588,1],[99317,588,1],[99617,588,1],[97550,621,1],[97850,621,1],[98150,621,1],[98450,621,1],[98750,621,1],[99050,621,1],[99350,621,1],[99650,621,1],[97555,626,1],[97855,626,1],[98155,626,1],[98455,626,1],[98755,626,1],[99055,626,1],[99355,626,1],[99655,626,1],[97556,627,1],[97856,627,1],[98156,627,1],[98456,627,1],[98756,627,1],[99056,627,1],[99356,627,1],[99656,627,1],[97561,632,1],[97861,632,1],[98161,632,1],[98461,632,1],[98761,632,1],[99061,632,1],[99361,632,1],[99661,632,1],[97562,633,1],[97862,633,1],[98162,633,1],[98462,633,1],[98762,633,1],[99062,633,1],[99362,633,1],[99662,633,1],[97567,638,1],[97867,638,1],[98167,638,1],[98467,638,1],[98767,638,1],[99067,638,1],[99367,638,1],[99667,638,1],[97572,643,1],[97872,643,1],[98172,643,1],[98472,643,1],[98772,643,1],[99072,643,1],[99372,643,1],[99672,643,1],[97574,645,1],[97874,645,1],[98174,645,1],[98474,645,1],[98774,645,1],[99074,645,1],[99374,645,1],[99674,645,1],[97578,649,1],[97878,649,1],[98178,649,1],[98478,649,1],[98778,649,1],[99078,649,1],[99378,649,1],[99678,649,1],[97580,651,1],[97880,651,1],[98180,651,1],[98480,651,1],[98780,651,1],[99080,651,1],[99380,651,1],[99680,651,1],[97583,654,1],[97883,654,1],[98183,654,1],[98483,654,1],[98783,654,1],[99083,654,1],[99383,654,1],[99683,654,1],[97587,658,1],[97887,658,1],[98187,658,1],[98487,658,1],[98787,658,1],[99087,658,1],[99387,658,1],[99687,658,1],[97591,662,1],[97891,662,1],[98191,662,1],[98491,662,1],[98791,662,1],[99091,662,1],[99391,662,1],[99691,662,1],[97593,664,1],[97893,664,1],[98193,664,1],[98493,664,1],[98793,664,1],[99093,664,1],[99393,664,1],[99693,664,1],[97594,665,1],[97894,665,1],[98194,665,1],[98494,665,1],[98794,665,1],[99094,665,1],[99394,665,1],[99694,665,1],[97597,668,1],[97897,668,1],[98197,668,1],[98497,668,1],[98797,668,1],[99097,668,1],[99397,668,1],[99697,668,1],[97620,692,1],[97920,692,1],[98220,692,1],[98520,692,1],[98820,692,1],[99120,692,1],[99420,692,1],[99720,692,1],[97623,695,1],[97923,695,1],[98223,695,1],[98523,695,1],[98823,695,1],[99123,695,1],[99423,695,1],[99723,695,1],[97626,698,1],[97926,698,1],[98226,698,1],[98526,698,1],[98826,698,1],[99126,698,1],[99426,698,1],[99726,698,1],[97631,703,1],[97931,703,1],[98231,703,1],[98531,703,1],[98831,703,1],[99131,703,1],[99431,703,1],[99731,703,1],[97386,758,1],[97686,758,1],[97986,758,1],[98286,758,1],[98586,758,1],[98886,758,1],[99186,758,1],[99486,758,1],[97389,761,1],[97689,761,1],[97989,761,1],[98289,761,1],[98589,761,1],[98889,761,1],[99189,761,1],[99489,761,1],[97394,766,1],[97694,766,1],[97994,766,1],[98294,766,1],[98594,766,1],[98894,766,1],[99194,766,1],[99494,766,1],[97399,771,1],[97699,771,1],[97999,771,1],[98299,771,1],[98599,771,1],[98899,771,1],[99199,771,1],[99499,771,1],[97401,773,1],[97701,773,1],[98001,773,1],[98301,773,1],[98601,773,1],[98901,773,1],[99201,773,1],[99501,773,1],[97402,774,1],[97702,774,1],[98002,774,1],[98302,774,1],[98602,774,1],[98902,774,1],[99202,774,1],[99502,774,1],[97404,776,1],[97704,776,1],[98004,776,1],[98304,776,1],[98604,776,1],[98904,776,1],[99204,776,1],[99504,776,1],[97408,780,1],[97708,780,1],[98008,780,1],[98308,780,1],[98608,780,1],[98908,780,1],[99208,780,1],[99508,780,1],[97412,784,1],[97712,784,1],[98012,784,1],[98312,784,1],[98612,784,1],[98912,784,1],[99212,784,1],[99512,784,1],[97414,786,1],[97714,786,1],[98014,786,1],[98314,786,1],[98614,786,1],[98914,786,1],[99214,786,1],[99514,786,1],[97416,788,1],[97716,788,1],[98016,788,1],[98316,788,1],[98616,788,1],[98916,788,1],[99216,788,1],[99516,788,1],[97421,793,1],[97721,793,1],[98021,793,1],[98321,793,1],[98621,793,1],[98921,793,1],[99221,793,1],[99521,793,1],[97426,798,1],[97726,798,1],[98026,798,1],[98326,798,1],[98626,798,1],[98926,798,1],[99226,798,1],[99526,798,1],[97430,802,1],[97730,802,1],[98030,802,1],[98330,802,1],[98630,802,1],[98930,802,1],[99230,802,1],[99530,802,1],[97432,804,1],[97732,804,1],[98032,804,1],[98332,804,1],[98632,804,1],[98932,804,1],[99232,804,1],[99532,804,1],[97483,858,1],[97783,858,1],[98083,858,1],[98383,858,1],[98683,858,1],[98983,858,1],[99283,858,1],[99583,858,1],[97538,915,1],[97838,915,1],[98138,915,1],[98438,915,1],[98738,915,1],[99038,915,1],[99338,915,1],[99638,915,1],[97416,1089,1],[97716,1089,1],[98016,1089,1],[98316,1089,1],[98616,1089,1],[98916,1089,1],[99216,1089,1],[99516,1089,1],[97434,1107,1],[97734,1107,1],[98034,1107,1],[98334,1107,1],[98634,1107,1],[98934,1107,1],[99234,1107,1],[99534,1107,1],[97435,1108,1],[97735,1108,1],[98035,1108,1],[98335,1108,1],[98635,1108,1],[98935,1108,1],[99235,1108,1],[99535,1108,1],[97439,1112,1],[97739,1112,1],[98039,1112,1],[98339,1112,1],[98639,1112,1],[98939,1112,1],[99239,1112,1],[99539,1112,1],[97442,1115,1],[97742,1115,1],[98042,1115,1],[98342,1115,1],[98642,1115,1],[98942,1115,1],[99242,1115,1],[99542,1115,1],[97445,1118,1],[97745,1118,1],[98045,1118,1],[98345,1118,1],[98645,1118,1],[98945,1118,1],[99245,1118,1],[99545,1118,1],[97446,1119,1],[97746,1119,1],[98046,1119,1],[98346,1119,1],[98646,1119,1],[98946,1119,1],[99246,1119,1],[99546,1119,1],[97507,1178,1],[97807,1178,1],[98107,1178,1],[98407,1178,1],[98707,1178,1],[99007,1178,1],[99307,1178,1],[99607,1178,1],[97512,1183,1],[97812,1183,1],[98112,1183,1],[98412,1183,1],[98712,1183,1],[99012,1183,1],[99312,1183,1],[99612,1183,1],[97574,1244,1],[97874,1244,1],[98174,1244,1],[98474,1244,1],[98774,1244,1],[99074,1244,1],[99374,1244,1],[99674,1244,1],[97578,1248,1],[97878,1248,1],[98178,1248,1],[98478,1248,1],[98778,1248,1],[99078,1248,1],[99378,1248,1],[99678,1248,1],[97634,1302,1],[97934,1302,1],[98234,1302,1],[98534,1302,1],[98834,1302,1],[99134,1302,1],[99434,1302,1],[99734,1302,1],[97408,1378,1],[97708,1378,1],[98008,1378,1],[98308,1378,1],[98608,1378,1],[98908,1378,1],[99208,1378,1],[99508,1378,1],[97412,1382,1],[97712,1382,1],[98012,1382,1],[98312,1382,1],[98612,1382,1],[98912,1382,1],[99212,1382,1],[99512,1382,1],[97414,1384,1],[97714,1384,1],[98014,1384,1],[98314,1384,1],[98614,1384,1],[98914,1384,1],[99214,1384,1],[99514,1384,1],[97445,1414,1],[97745,1414,1],[98045,1414,1],[98345,1414,1],[98645,1414,1],[98945,1414,1],[99245,1414,1],[99545,1414,1],[97446,1415,1],[97746,1415,1],[98046,1415,1],[98346,1415,1],[98646,1415,1],[98946,1415,1],[99246,1415,1],[99546,1415,1],[97449,1418,1],[97749,1418,1],[98049,1418,1],[98349,1418,1],[98649,1418,1],[98949,1418,1],[99249,1418,1],[99549,1418,1],[97469,1437,1],[97769,1437,1],[98069,1437,1],[98369,1437,1],[98669,1437,1],[98969,1437,1],[99269,1437,1],[99569,1437,1],[97489,1458,1],[97789,1458,1],[98089,1458,1],[98389,1458,1],[98689,1458,1],[98989,1458,1],[99289,1458,1],[99589,1458,1]]},{"id":31,"qlen":1699,"truth":[90999,92699],"note":"\u5e72\u51c0 read\uff1a\u51e0\u4e4e\u5168\u5728\u4e00\u6761\u5bf9\u89d2\u7ebf\u4e0a\uff0c\u8fc7\u6ee4\u57fa\u672c\u4e0d\u4e22","anchors":[[91000,1,1],[91190,191,1],[91310,308,1],[91311,309,1],[91314,312,1],[91422,422,1],[91507,504,1],[91508,505,1],[91509,506,1],[91514,511,1],[91515,512,1],[91516,513,1],[91569,567,1],[91587,585,1],[91662,656,1],[91736,733,1],[91741,738,1],[91742,739,1],[91747,744,1],[91749,746,1],[91750,747,1],[91782,779,1],[91865,862,1],[91913,912,1],[91916,915,1],[91921,920,1],[91965,964,1],[91969,968,1],[92020,1021,1],[92024,1025,1],[92041,1042,1],[92077,1078,1],[92078,1079,1],[92083,1084,1],[92369,1368,1],[92372,1371,1],[92390,1389,1],[92416,1416,1],[92420,1420,1]]}]};
+const K_MER = DATA.k;
+
+/* ---------------- 参数 ---------------- */
+const CHAIN_P = { minCnt:3, minSc:40, maxDistX:500, maxDistY:500, bw:500,
+                  maxSkip:25, maxIter:50, penGap:0.5, penSkip:0.05 };
+const NEG = -1073741824;
+
+const state = { read:0, strand:0, B:100, K:2, nb:1, mode:'topk',
+                showDropped:true, showBase:true, histFocus:true, manual:new Set(),
+                hoverBucket:null, hoverAnchor:null };
+
+/* ---------------- 过滤（移植 diagonal_filter） ---------------- */
+function computeSel(group, opts) {
+  const { B, K, nb, mode, manual } = opts;
+  if (manual && manual.size) return new Set(manual);   // 手动模式
+  const counts = new Map();
+  for (const a of group) { const b = Math.floor((a.r - a.q) / B);
+                           counts.set(b, (counts.get(b) || 0) + 1); }
+  const arr = [...counts.entries()].sort((x, y) => y[1] - x[1] || x[0] - y[0]);
+  let chosen;
+  if (mode === 'adaptive') {
+    chosen = []; let cum = 0;
+    for (const [b, c] of arr) { chosen.push(b); cum += c;
+      if (cum >= 0.8 * group.length || c < 2) break; }
+  } else {
+    chosen = arr.slice(0, K).map(e => e[0]);
+  }
+  const sel = new Set();
+  for (const b of chosen) for (let d = -nb; d <= nb; d++) sel.add(b + d);
+  return { sel, counts, chosen };
+}
+
+function analyze(anchors, opts, strands) {
+  const keptIds = new Set(); const info = [];
+  for (const s of strands) {
+    const g = anchors.filter(a => a.s === s);
+    if (!g.length) continue;
+    const r = computeSel(g, opts);
+    const sel = r instanceof Set ? r : r.sel;
+    info.push({ s, counts: r.counts || manualCounts(g, opts.B), sel });
+    for (const a of g) { const b = Math.floor((a.r - a.q) / opts.B);
+                         if (sel.has(b)) { a.bucket = b; keptIds.add(a.id); } }
+  }
+  return { keptIds, info };
+}
+function manualCounts(group, B) {
+  const m = new Map();
+  for (const a of group) { const b = Math.floor((a.r - a.q) / B);
+                           m.set(b, (m.get(b) || 0) + 1); }
+  return m;
+}
+
+/* ---------------- DP 链化（移植 chain_anchors） ---------------- */
+function chainScore(ai, aj, p) {
+  const qd = ai.q - aj.q;
+  if (qd <= 0 || qd > p.maxDistX) return NEG;
+  const rd = ai.r - aj.r;
+  if (rd === 0 || qd > p.maxDistY) return NEG;
+  let gap = rd - qd; if (gap < 0) gap = -gap;
+  if (gap > p.bw) return NEG;
+  const minD = Math.min(rd, qd);
+  let sc = Math.min(aj.span, minD);
+  if (gap > 0 || minD > aj.span) {
+    const lin = p.penGap * gap + p.penSkip * minD;
+    const logp = gap >= 1 ? Math.log2(gap + 1) : 0;
+    sc -= Math.floor(lin + 0.5 * logp);
+  }
+  return sc;
+}
+
+function chainPartition(a, p, stat) {
+  const n = a.length;
+  const score = new Array(n), pred = new Array(n).fill(-1), visited = new Array(n).fill(0);
+  let ws = 0;
+  for (let i = 0; i < n; i++) {
+    let best = a[i].span, bp = -1, skip = 0;
+    while (ws < i && a[i].r - a[ws].r > p.maxDistX) ws++;
+    if (i - ws > p.maxIter) ws = i - p.maxIter;
+    for (let j = i - 1; j >= ws; j--) {
+      stat.scans++;
+      const sc = chainScore(a[i], a[j], p);
+      if (sc === NEG) continue;
+      const tot = sc + score[j];
+      if (tot > best) { best = tot; bp = j; if (skip > 0) skip--; }
+      else if (visited[j] === i) { skip++; if (skip > p.maxSkip) break; }
+      if (pred[j] >= 0) visited[pred[j]] = i;
+    }
+    score[i] = best; pred[i] = bp;
+  }
+  const cands = [];
+  for (let i = 0; i < n; i++) if (score[i] >= p.minSc) cands.push([score[i], i]);
+  cands.sort((x, y) => y[0] - x[0] || x[1] - y[1]);
+  const v2 = new Array(n).fill(0); const chains = [];
+  for (const [, k] of cands) {
+    if (v2[k]) continue;
+    let i = k, maxI = k, maxS = 0;
+    while (true) {
+      v2[i] = 2;
+      i = pred[i];
+      const s = i < 0 ? score[k] : score[k] - score[i];
+      if (s > maxS) { maxS = s; maxI = i; }
+      else if (maxS - s > p.bw) break;
+      if (i < 0 || v2[i]) break;
+    }
+    const idxs = []; i = k;
+    while (i >= 0 && i !== maxI) { idxs.push(i); v2[i] = 1; i = pred[i]; }
+    const sc = maxI < 0 ? score[k] : score[k] - score[maxI];
+    if (sc >= p.minSc && idxs.length >= p.minCnt) {
+      const anchors = idxs.slice().reverse().map(j => a[j]);
+      chains.push({ score: sc, n: idxs.length, anchors });
+    }
+  }
+  return chains;
+}
+
+function chainAnchors(anchors, p) {
+  const stat = { scans: 0 }; const chains = [];
+  for (const s of [1, -1]) {
+    const a = anchors.filter(x => x.s === s).sort((x, y) => x.r - y.r);
+    if (a.length) chains.push(...chainPartition(a, p, stat));
+  }
+  chains.sort((x, y) => y.score - x.score);
+  return { chains, scans: stat.scans };
+}
+
+/* ---------------- 汇总 ---------------- */
+function truthRecall(chain, truth) {
+  if (!chain || !chain.anchors.length) return 0;
+  let r0 = Infinity, r1 = -Infinity;
+  for (const a of chain.anchors) { r0 = Math.min(r0, a.r); r1 = Math.max(r1, a.r + K_MER); }
+  const ov = Math.min(r1, truth[1]) - Math.max(r0, truth[0]);
+  return Math.max(0, ov) / (truth[1] - truth[0]);
+}
+
+function computeAll() {
+  const rd = DATA.reads[state.read];
+  const anchors = rd.anchors.map(([r, q, s], i) => ({ id: i, r, q, s, span: K_MER, bucket: null }));
+  const strands = state.strand === 0 ? [1, -1] : [state.strand === 1 ? 1 : -1];
+  const opts = { B: state.B, K: state.K, nb: state.nb, mode: state.mode,
+                 manual: state.manual.size ? state.manual : null };
+  const { keptIds, info } = analyze(anchors, opts, strands);
+  const kept = anchors.filter(a => keptIds.has(a.id));
+  const base = chainAnchors(anchors, CHAIN_P);
+  const filt = chainAnchors(kept, CHAIN_P);
+  return { rd, anchors, kept, info, base, filt };
+}
+
+/* ================= 渲染 ================= */
+const cvS = document.getElementById('cvScatter'), ctxS = cvS.getContext('2d');
+const cvH = document.getElementById('cvHist'), ctxH = cvH.getContext('2d');
+const tipS = document.getElementById('tipScatter'), tipH = document.getElementById('tipHist');
+const DPR = window.devicePixelRatio || 1;
+
+function hidpi(cv, ctx, w, h) {
+  cv.width = w * DPR; cv.height = h * DPR;
+  cv.style.width = w + 'px'; cv.style.height = h + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+
+function px2q(x, M) { return (x - M.l) / (M.w) * (M.q1 - M.q0) + M.q0; }
+function px2r(y, M) { return M.r1 - (y - M.t) / (M.h) * (M.r1 - M.r0); }
+
+function drawScatter(C) {
+  const W = 660, H = 440;
+  hidpi(cvS, ctxS, W, H);
+  const M = { l: 62, r: 14, t: 14, b: 38 };
+  M.w = W - M.l - M.r; M.h = H - M.t - M.b;
+  const { rd, anchors, kept, base, filt } = C;
+  // 坐标范围：q ∈ [0, qlen]；r 取 truth 和 anchors 的包络
+  const keptSet = new Set(kept.map(a => a.id));
+  let r0 = rd.truth[0], r1 = rd.truth[1];
+  for (const a of anchors) { r0 = Math.min(r0, a.r); r1 = Math.max(r1, a.r + K_MER); }
+  const pad = (r1 - r0) * 0.06 + 40;
+  r0 -= pad; r1 += pad;
+  const q0 = 0, q1 = rd.qlen;
+  const X = q => M.l + (q - q0) / (q1 - q0) * M.w;
+  const Y = r => M.t + (r1 - r) / (r1 - r0) * M.h;
+  M.q0 = q0; M.q1 = q1; M.r0 = r0; M.r1 = r1;
+  C.M = M; C.X = X; C.Y = Y;
+
+  ctxS.fillStyle = '#fff'; ctxS.fillRect(0, 0, W, H);
+  ctxS.save();
+  ctxS.beginPath(); ctxS.rect(M.l, M.t, M.w, M.h); ctxS.clip();
+
+  // 入选桶 → 对角线带（r = q + [bB, (b+1)B)），以中心线粗细表示带宽
+  const B = state.B;
+  const yScale = M.h / (r1 - r0);
+  const bandW = Math.min(20, Math.max(9, B * yScale * 2.2));
+  const bandLine = (b, color) => {
+    const c = b * B + B / 2;
+    ctxS.strokeStyle = color; ctxS.lineWidth = bandW; ctxS.lineCap = 'butt';
+    ctxS.beginPath();
+    ctxS.moveTo(X(q0), Y(c + q0)); ctxS.lineTo(X(q1), Y(c + q1));
+    ctxS.stroke();
+  };
+  for (const info of C.info) {
+    for (const b of info.sel) {
+      const hot = state.hoverBucket !== null && Math.floor(state.hoverBucket) === b;
+      bandLine(b, hot ? 'rgba(22,163,74,.6)' : 'rgba(22,163,74,.35)');
+    }
+  }
+  // 悬停桶（未入选）也高亮
+  if (state.hoverBucket !== null) {
+    const b = state.hoverBucket;
+    if (![...C.info.flatMap(i => [...i.sel])].includes(b))
+      bandLine(b, 'rgba(100,116,139,.3)');
+  }
+
+  // 基线最优链（虚线）
+  if (state.showBase && base.chains[0]) {
+    drawChain(ctxS, base.chains[0], X, Y, '#94a3b8', 2, [6, 5]);
+  }
+  // 过滤后次优链
+  if (filt.chains[1]) drawChain(ctxS, filt.chains[1], X, Y, 'rgba(217,119,6,.9)', 2, [8, 5]);
+  // 过滤后最优链
+  if (filt.chains[0]) drawChain(ctxS, filt.chains[0], X, Y, '#16a34a', 2.5, []);
+
+  // anchor 点
+  for (const a of anchors) {
+    const isKept = keptSet.has(a.id);
+    if (!isKept && !state.showDropped) continue;
+    const x = X(a.q), y = Y(a.r);
+    if (!isKept) { ctxS.fillStyle = 'rgba(203,213,225,.85)'; dot(x, y, 2.6); }
+    else if (state.hoverAnchor === a.id) { ctxS.fillStyle = '#0f172a'; dot(x, y, 5); }
+    else { ctxS.fillStyle = a.s > 0 ? 'rgba(37,99,235,.85)' : 'rgba(225,29,72,.85)'; dot(x, y, 3.4); }
+  }
+  ctxS.restore();
+
+  // 坐标轴
+  axis(ctxS, M, q0, q1, r0, r1, rd.qlen);
+}
+function drawChain(ctx, chain, X, Y, color, width, dash) {
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = width;
+  if (dash.length) ctx.setLineDash(dash);
+  ctx.beginPath();
+  chain.anchors.forEach((a, i) => i ? ctx.lineTo(X(a.q), Y(a.r)) : ctx.moveTo(X(a.q), Y(a.r)));
+  ctx.stroke(); ctx.restore();
+}
+function dot(x, y, r) { ctxS.beginPath(); ctxS.arc(x, y, r, 0, 7); ctxS.fill(); }
+
+function axis(ctx, M, q0, q1, r0, r1, qlen) {
+  ctx.fillStyle = '#64748b'; ctx.strokeStyle = '#e2e8f0';
+  ctx.font = '11px ui-monospace, monospace';
+  const qStep = niceStep(qlen, 6);
+  for (let q = 0; q <= qlen; q += qStep) {
+    const x = M.l + (q - q0) / (q1 - q0) * M.w;
+    ctx.fillText(q + '', x - 8, M.t + M.h + 16);
+  }
+  const rStep = niceStep(r1 - r0, 5);
+  for (let r = Math.ceil(r0 / rStep) * rStep; r <= r1; r += rStep) {
+    const y = M.t + (r1 - r) / (r1 - r0) * M.h;
+    ctx.fillText(Math.round(r) + '', 8, y + 4);
+  }
+  ctx.fillStyle = '#334155';
+  ctx.fillText('q (read 上位置, bp)', M.l + M.w / 2 - 60, M.t + M.h + 30);
+  ctx.save(); ctx.translate(14, M.t + M.h / 2 + 30); ctx.rotate(-Math.PI / 2);
+  ctx.fillText('r (target 上位置, bp)', 0, 0); ctx.restore();
+}
+function niceStep(range, n) {
+  const raw = range / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  return [1, 2, 5, 10].map(m => m * mag).find(s => s >= raw) || mag;
+}
+
+function drawHist(C) {
+  const W = 300, H = 440;
+  hidpi(cvH, ctxH, W, H);
+  const M = { l: 46, r: 12, t: 14, b: 38 };
+  M.w = W - M.l - M.r; M.h = H - M.t - M.b;
+  const { anchors, info } = C;
+  const B = state.B;
+  // 展示链位的桶计数（与散点一致的链位集合）
+  let counts = new Map(), sel = new Set(), dmin = Infinity, dmax = -Infinity;
+  for (const a of anchors) { const d = a.r - a.q; dmin = Math.min(dmin, d); dmax = Math.max(dmax, d); }
+  for (const inf of info) {
+    for (const [b, c] of inf.counts) counts.set(b, (counts.get(b) || 0) + c);
+    for (const b of inf.sel) sel.add(b);
+  }
+  C.histCounts = counts; C.histSel = sel;
+  C.histD = { dmin, dmax };
+  let b0 = Math.floor(dmin / B), b1 = Math.floor(dmax / B);
+  if (state.histFocus) {   // 聚焦峰区：只画入选桶附近，噪声全范围会把桶挤成色块
+    const selArr = [...sel];
+    if (selArr.length) {
+      const span = Math.max(...selArr) - Math.min(...selArr);
+      const m = Math.max(8, Math.round(span * 0.3));
+      b0 = Math.min(...selArr) - m; b1 = Math.max(...selArr) + m;
+    }
+  }
+  const nb = b1 - b0 + 1;
+  const maxC = Math.max(...counts.values(), 1);
+  const bh = M.h / nb;
+  const bMid = b => M.t + (b1 - b + 0.5) * bh;   // d 轴向上
+  C.histGeom = { b0, b1, bh, bMid, M };
+
+  ctxH.fillStyle = '#fff'; ctxH.fillRect(0, 0, W, H);
+  // 桶边界细线（桶高足够时才画）
+  if (bh >= 5) {
+    ctxH.strokeStyle = '#f1f5f9';
+    for (let b = b0; b <= b1 + 1; b++) {
+      const y = M.t + (b1 - b + 1) * bh;
+      ctxH.beginPath(); ctxH.moveTo(M.l, y); ctxH.lineTo(M.l + M.w, y); ctxH.stroke();
+    }
+  }
+  for (let b = b0; b <= b1; b++) {
+    const c = counts.get(b) || 0;
+    const y = bMid(b), h = Math.max(2, bh - 3);
+    const isSel = sel.has(b);
+    const hot = state.hoverBucket === b;
+    let color = c === 0 ? '#eef2f7' : (isSel ? 'rgba(22,163,74,.8)' : 'rgba(100,116,139,.75)');
+    if (hot) color = c === 0 ? '#dbe3ec' : '#0f172a';
+    ctxH.fillStyle = color;
+    const wBar = c === 0 ? 6 : Math.max(8, c / maxC * M.w);
+    ctxH.fillRect(M.l, y - h / 2, wBar, h);
+    if (c > 0 && (isSel || c / maxC > 0.25 || hot)) {
+      ctxH.fillStyle = hot ? '#0f172a' : '#334155';
+      ctxH.font = '11px ui-monospace, monospace';
+      ctxH.fillText(c + '', M.l + wBar + 4, y + 4);
+    }
+  }
+  // d 轴刻度：按当前视图桶范围标桶起点
+  ctxH.fillStyle = '#64748b'; ctxH.font = '11px ui-monospace, monospace';
+  const tickStep = Math.max(1, Math.round(nb / 6));
+  for (let b = Math.ceil(b0 / tickStep) * tickStep; b <= b1; b += tickStep) {
+    const y = M.t + (b1 - b + 0.5) * bh;
+    ctxH.fillText((b * B) + '', 6, y + 4);
+  }
+  ctxH.fillStyle = '#334155';
+  ctxH.fillText('d = r − q (bp)', M.l + M.w / 2 - 40, M.t + M.h + 22);
+  if (bh >= 14) ctxH.fillText('anchor 数', M.l + M.w / 2 - 28, M.t + M.h + 36);
+}
+
+function drawStats(C) {
+  const { rd, anchors, kept, base, filt } = C;
+  const bBest = base.chains[0] || null, fBest = filt.chains[0] || null;
+  const recB = truthRecall(bBest, rd.truth), recF = truthRecall(fBest, rd.truth);
+  const rows = [
+    ['anchor 数', anchors.length, kept.length, pct(kept.length, anchors.length)],
+    ['DP 扫描步数', base.scans, filt.scans, pct(filt.scans, base.scans)],
+    ['scan / anchor', (base.scans / anchors.length).toFixed(1),
+     anchors.length ? (filt.scans / kept.length).toFixed(1) : '—', null],
+    ['最优链分数', bBest ? bBest.score : 0, fBest ? fBest.score : 0, null],
+    ['最优链 anchor 数', bBest ? bBest.n : 0, fBest ? fBest.n : 0, null],
+    ['次优链分数（MAPQ 来源）', base.chains[1] ? base.chains[1].score : 0,
+     filt.chains[1] ? filt.chains[1].score : 0, null],
+    ['真值 recall', (recB * 100).toFixed(0) + '%', (recF * 100).toFixed(0) + '%', null],
+  ];
+  const tb = document.getElementById('statsBody');
+  tb.innerHTML = rows.map(([name, a, b, d]) => {
+    let dHtml = '—';
+    if (d !== null) {
+      const cls = name === '真值 recall' || d < 0 ? (d < 0 ? 'delta-down' : 'delta-bad') : (d < 0 ? 'delta-down' : 'delta-bad');
+      dHtml = `<td class="${cls}">${d > 0 ? '+' : ''}${d}%</td>`;
+    }
+    return `<tr><td>${name}</td><td>${a}</td><td>${b}</td>${dHtml}</tr>`;
+  }).join('');
+
+  // 动态提示
+  const hint = document.getElementById('hintBox');
+  hint.className = 'hint';
+  if (!anchors.length) { /* skip */ }
+  else if (recF < recB - 0.03) {
+    hint.classList.add('warn');
+    hint.textContent = `⚠ 过滤误杀了真链（recall ${(recB * 100).toFixed(0)}% → ${(recF * 100).toFixed(0)}%）。真链的 d 漂移横跨了多个桶：试试增大 B、提高 top-K 或邻桶 ±，这正是"B 太小 / K=1 过狠"的失败模式。`;
+  } else if (filt.scans < base.scans * 0.8) {
+    hint.classList.add('ok');
+    hint.textContent = `✓ 扫描量下降 ${(100 - filt.scans / base.scans * 100).toFixed(0)}%，最优链不变（recall ${(recF * 100).toFixed(0)}%）。两个乘子同时被压低：anchor 少了 ${(100 - kept.length / anchors.length * 100).toFixed(0)}%，scan/anchor 从 ${(base.scans / anchors.length).toFixed(1)} 降到 ${(filt.scans / kept.length).toFixed(1)}。`;
+  } else if (filt.scans >= base.scans * 0.98) {
+    hint.classList.add('ok');
+    hint.textContent = '✓ 当前选峰几乎保留了全部 anchor（如自适应模式或邻桶过宽），过滤接近无操作——安全但收益小。';
+  }
+}
+
+function drawLive(C) {
+  const { anchors, kept, info, base, filt } = C;
+  const b0 = info[0] ? [...info[0].counts.keys()].sort((x, y) => x - y)[0] : 0;
+  const nBuckets = info[0] ? info[0].counts.size : 0;
+  const nSel = info.reduce((s, i) => s + i.sel.size, 0);
+  const chosen = info[0] && !(info[0].sel instanceof Set && state.manual.size) ?
+    `入选桶 = [${[...info[0].sel].sort((a, b) => a - b).join(', ')}]` : '';
+  document.getElementById('live1').textContent = `d ∈ [${fmt(C.histD ? C.histD.dmin : 0)}, ${fmt(C.histD ? C.histD.dmax : 0)}]`;
+  document.getElementById('live2').textContent = `B = ${state.B} bp，${nBuckets} 个非空桶`;
+  document.getElementById('live3').textContent = (state.manual.size ? '手动模式：' : state.mode === 'topk' ? `K = ${state.K}，` : '自适应 80%，') + chosen;
+  document.getElementById('live4').textContent = `${anchors.length} → ${kept.length}（−${(100 - kept.length / anchors.length * 100).toFixed(0)}%）`;
+  document.getElementById('live5').textContent = `DP 扫描 ${fmt(base.scans)} → ${fmt(filt.scans)}（−${(100 - filt.scans / base.scans * 100).toFixed(0)}%）`;
+}
+function fmt(x) { return (x || 0).toLocaleString('en-US'); }
+function pct(a, b) { return b ? Math.round((a - b) / b * 100) : 0; }
+
+/* ================= 交互 ================= */
+let CUR = null;
+function render() {
+  CUR = computeAll();
+  drawScatter(CUR);
+  drawHist(CUR);
+  drawStats(CUR);
+  drawLive(CUR);
+}
+
+// 控件
+const selRead = document.getElementById('selRead');
+DATA.reads.forEach((rd, i) => {
+  const o = document.createElement('option');
+  o.value = i; o.textContent = `#${rd.id} · ${rd.anchors.length} anchors`;
+  selRead.appendChild(o);
+});
+function syncControls() {
+  selRead.value = state.read;
+  document.getElementById('rgB').value = state.B;
+  document.getElementById('vB').textContent = state.B;
+  document.getElementById('rgK').value = state.K;
+  document.getElementById('vK').textContent = state.K;
+  document.getElementById('rgNb').value = state.nb;
+  document.getElementById('vNb').textContent = state.nb;
+  document.getElementById('selMode').value = state.mode;
+  document.getElementById('selStrand').value = state.strand;
+  document.getElementById('ckDropped').checked = state.showDropped;
+  document.getElementById('ckBase').checked = state.showBase;
+  document.getElementById('ckFocus').checked = state.histFocus;
+  const manual = state.manual.size > 0;
+  document.getElementById('btnAuto').style.display = manual ? '' : 'none';
+  document.getElementById('manualBadge').style.display = manual ? '' : 'none';
+  // read 说明
+  const note = DATA.reads[state.read].note;
+  selRead.title = note;
+}
+selRead.onchange = e => { state.read = +e.target.value; state.manual.clear(); syncControls(); render(); };
+document.getElementById('selStrand').onchange = e => { state.strand = +e.target.value; render(); };
+document.getElementById('rgB').oninput = e => { state.B = +e.target.value; document.getElementById('vB').textContent = state.B; render(); };
+document.getElementById('rgK').oninput = e => { state.K = +e.target.value; document.getElementById('vK').textContent = state.K; render(); };
+document.getElementById('rgNb').oninput = e => { state.nb = +e.target.value; document.getElementById('vNb').textContent = state.nb; render(); };
+document.getElementById('selMode').onchange = e => { state.mode = e.target.value; render(); };
+document.getElementById('ckDropped').onchange = e => { state.showDropped = e.target.checked; render(); };
+document.getElementById('ckBase').onchange = e => { state.showBase = e.target.checked; render(); };
+document.getElementById('ckFocus').onchange = e => { state.histFocus = e.target.checked; render(); };
+document.getElementById('btnK1').onclick = () => {
+  state.read = 0; state.B = 100; state.K = 1; state.nb = 1; state.mode = 'topk';
+  state.manual.clear(); syncControls(); render();
+};
+document.getElementById('btnReset').onclick = () => {
+  state.read = 0; state.B = 100; state.K = 2; state.nb = 1; state.mode = 'topk';
+  state.strand = 0; state.manual.clear(); syncControls(); render();
+};
+document.getElementById('btnAuto').onclick = () => { state.manual.clear(); syncControls(); render(); };
+
+// 散点悬停
+cvS.addEventListener('mousemove', e => {
+  if (!CUR || !CUR.M) return;
+  const rect = cvS.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const q = px2q(x, CUR.M), r = px2r(y, CUR.M);
+  const d = r - q;
+  state.hoverBucket = Math.floor(d / state.B);
+  let best = null, bd = 100;
+  for (const a of CUR.anchors) {
+    const dx = CUR.X(a.q) - x, dy = CUR.Y(a.r) - y, dd = dx * dx + dy * dy;
+    if (dd < bd) { bd = dd; best = a; }
+  }
+  state.hoverAnchor = best ? best.id : null;
+  if (best && bd < 60) {
+    const kept = CUR.kept.some(k => k.id === best.id);
+    const c = best.bucket !== null ? best.bucket : Math.floor((best.r - best.q) / state.B);
+    tipS.style.opacity = 1;
+    tipS.style.left = (x + 14) + 'px'; tipS.style.top = (y - 10) + 'px';
+    tipS.innerHTML = `q=${best.q} r=${best.r}<br>d=${best.r - best.q} → 桶 ${c}（${state.B}bp）<br><b>${kept ? '保留' : '丢弃'}</b> · ${best.s > 0 ? '正链' : '负链'}`;
+  } else {
+    tipS.style.opacity = 1;
+    tipS.style.left = (x + 14) + 'px'; tipS.style.top = (y - 10) + 'px';
+    tipS.innerHTML = `d = ${Math.round(d)} → 桶 ${state.hoverBucket}（${state.B}bp）`;
+  }
+  render();
+});
+cvS.addEventListener('mouseleave', () => { state.hoverBucket = null; state.hoverAnchor = null; tipS.style.opacity = 0; render(); });
+
+// 直方图悬停 + 点击
+cvH.addEventListener('mousemove', e => {
+  if (!CUR || !CUR.histGeom) return;
+  const rect = cvH.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const { b0, b1, bh, bMid, M } = CUR.histGeom;
+  if (x < M.l || y < M.t || y > M.t + M.h) { tipH.style.opacity = 0; return; }
+  const b = Math.round(b1 - (y - M.t) / bh + 0.5) - 1;
+  const bb = Math.max(b0, Math.min(b1, b));
+  state.hoverBucket = bb;
+  const c = (CUR.histCounts.get(bb) || 0);
+  const inSel = CUR.histSel.has(bb);
+  tipH.style.opacity = 1;
+  tipH.style.left = (x + 12) + 'px'; tipH.style.top = (y - 8) + 'px';
+  tipH.innerHTML = `桶 ${bb}：d ∈ [${bb * state.B}, ${(bb + 1) * state.B})<br>${c} 个 anchor · <b>${inSel ? '入选' : '淘汰'}</b><br>点击可${inSel ? '移出' : '加入'}选桶`;
+  render();
+});
+cvH.addEventListener('mouseleave', () => { state.hoverBucket = null; tipH.style.opacity = 0; render(); });
+cvH.addEventListener('click', e => {
+  if (!CUR || !CUR.histGeom) return;
+  const rect = cvH.getBoundingClientRect();
+  const y = e.clientY - rect.top;
+  const { b0, b1, bh, M } = CUR.histGeom;
+  if (y < M.t || y > M.t + M.h) return;
+  const b = Math.max(b0, Math.min(b1, Math.round(b1 - (y - M.t) / bh + 0.5) - 1));
+  if (state.manual.has(b)) state.manual.delete(b); else state.manual.add(b);
+  syncControls(); render();
+});
+
+syncControls();
+render();
+</script>
+</body>
+</html>

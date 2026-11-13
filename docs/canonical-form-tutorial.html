@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Canonical Form 详解 — DNA 序列的规范形</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2027;
+    --panel2: #212a33;
+    --text: #d7dde3;
+    --muted: #8a97a3;
+    --accent: #4fc1ff;
+    --accent2: #ffd580;
+    --green: #7ee787;
+    --red: #ff7b72;
+    --purple: #d2a8ff;
+    --border: #2d3640;
+    --mono: "SF Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 48px 24px 96px; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 40px; }
+  h1 { font-size: 2rem; margin: 0 0 8px; color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 1.05rem; }
+  h2 {
+    color: var(--accent2); font-size: 1.4rem; margin-top: 56px;
+    padding-bottom: 8px; border-bottom: 2px solid var(--border);
+  }
+  h3 { color: var(--accent); font-size: 1.1rem; margin-top: 32px; }
+  code {
+    font-family: var(--mono); background: var(--panel2);
+    padding: 2px 6px; border-radius: 4px; font-size: 0.9em; color: var(--green);
+  }
+  pre {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px; overflow-x: auto; font-family: var(--mono); font-size: 0.88rem;
+    line-height: 1.6;
+  }
+  pre code { background: none; padding: 0; }
+  .block {
+    background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+    border-radius: 8px; padding: 16px 20px; margin: 20px 0;
+  }
+  .block.warn { border-left-color: var(--red); }
+  .block.key { border-left-color: var(--green); }
+  .block .title { font-weight: 600; color: var(--accent); margin-bottom: 6px; }
+  .block.warn .title { color: var(--red); }
+  .block.key .title { color: var(--green); }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 0.92rem; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--panel2); color: var(--accent2); font-weight: 600; }
+  td { font-family: var(--mono); }
+  td.zh { font-family: inherit; }
+  .demo {
+    background: var(--panel); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 24px; margin: 24px 0;
+  }
+  .demo h3 { margin-top: 0; }
+  input[type="text"] {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    font-family: var(--mono); font-size: 1.1rem; padding: 10px 14px; border-radius: 6px;
+    width: 260px; letter-spacing: 2px; outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+  button {
+    background: var(--accent); color: #0b0f13; border: none; padding: 10px 20px;
+    border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-left: 8px;
+  }
+  button:hover { filter: brightness(1.1); }
+  .result { margin-top: 20px; font-family: var(--mono); font-size: 1rem; }
+  .result .row { padding: 6px 0; display: flex; gap: 12px; align-items: center; }
+  .result .label { color: var(--muted); width: 200px; flex-shrink: 0; font-family: inherit; font-size: 0.85rem; }
+  .seq { letter-spacing: 3px; font-weight: 600; }
+  .hl-fwd { color: var(--green); }
+  .hl-rev { color: var(--purple); }
+  .hl-can { color: var(--accent2); background: rgba(255,213,128,0.08); padding: 2px 6px; border-radius: 4px; }
+  .error { color: var(--red); font-family: inherit; }
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 24px 0; }
+  .flow-step {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 18px;
+  }
+  .flow-arrow { text-align: center; color: var(--muted); font-size: 1.3rem; padding: 4px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 24px; margin-bottom: 40px; }
+  .toc a { color: var(--accent); text-decoration: none; display: block; padding: 3px 0; }
+  .toc a:hover { text-decoration: underline; }
+  .kbd { color: var(--accent2); }
+  footer { margin-top: 80px; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--border); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Canonical Form（规范形）详解</h1>
+  <p class="subtitle">为什么比对工具只查一次 hash 就能同时找到正、反链的匹配？以 rammap / minimap2 为例</p>
+</header>
+
+<nav class="toc">
+  <strong style="color:var(--accent2)">目录</strong>
+  <a href="#s1">1. 背景：DNA 是双链的</a>
+  <a href="#s2">2. 问题：朴素的 hash 匹配会漏掉一半</a>
+  <a href="#s3">3. 解决方案：canonical form 的定义</a>
+  <a href="#s4">4. 为什么有效：等价类与确定性代表</a>
+  <a href="#s5">5. 交互式演示</a>
+  <a href="#s6">6. 代价与额外收获：strand bit</a>
+  <a href="#s7">7. 在 rammap / minimap2 中的完整落地</a>
+  <a href="#s8">8. 常见疑问</a>
+</nav>
+
+<!-- ============ 1 ============ -->
+<h2 id="s1">1. 背景：DNA 是双链的</h2>
+<p>
+  DNA 是双链分子，两条链通过<strong>碱基互补配对</strong>（A↔T, C↔G）结合，且方向相反
+  （一条 5'→3'，另一条 3'→5'）。所以任何一段序列 <code>S</code> 其实有两种"读法"：
+</p>
+<ul>
+  <li>正向读出来：<code>S</code></li>
+  <li>读它的互补链（等价于把 <code>S</code> 做<strong>反向互补</strong>，Reverse Complement，记作 <code>RC(S)</code>）</li>
+</ul>
+<p>
+  这两种写法代表<strong>同一份序列内容</strong>。在比对工具（minimap2、rammap 等）的世界里，query read
+  可能来自参考基因组任意一条链、任意方向——你事先不知道方向。
+</p>
+
+<h3>反向互补的机械规则</h3>
+<pre><code>第一步：complement（每个碱基换成互补碱基）  A↔T, C↔G
+第二步：reverse（整个串倒过来读）
+
+例：  S     = A C G T
+      compl = T G C A
+      RC(S) = A C G T        （此例恰好是回文）</code></pre>
+
+<!-- ============ 2 ============ -->
+<h2 id="s2">2. 问题：朴素的 hash 匹配会漏掉一半</h2>
+<p>
+  比对的第一步是<strong>seeding</strong>：把 query 切成 k-mer，对每个 k-mer 计算 hash，
+  去参考序列的 hash 索引（index）里查找相同的 k-mer。命中即得到一个候选锚点（anchor）。
+</p>
+<p>现在考虑一个具体场景：</p>
+
+<div class="block warn">
+  <div class="title">问题场景</div>
+  <p style="margin:0">
+    query 上有一个 k-mer <code class="kbd">ACG</code>（k=3）。<br>
+    参考基因组中，这段序列出现在<strong>负链</strong>上——意味着在索引建库时，
+    从正链读出来它是 <code class="kbd">CGT</code>（<code>ACG</code> 的反向互补）。<br><br>
+    如果你直接拿原始 k-mer 建 hash：<code>hash(ACG)</code> ≠ <code>hash(CGT)</code>，
+    查找<strong>失败</strong>。一个真实存在的匹配，就这么漏掉了。
+  </p>
+</div>
+
+<p>一个自然的补救思路有两种，但都不理想：</p>
+<table>
+  <tr><th>方案</th><th class="zh">做法</th><th class="zh">代价</th></tr>
+  <tr>
+    <td>① 双份索引</td>
+    <td>把参考序列正向、反向互补各建一套 hash 索引</td>
+    <td class="zh">内存 ×2，索引构建时间 ×2</td>
+  </tr>
+  <tr>
+    <td>② 双向查询</td>
+    <td>query 每个 k-mer 用原始形式和 RC 形式各查一次</td>
+    <td class="zh">查询次数 ×2，seeding 时间 ×2</td>
+  </tr>
+</table>
+
+<!-- ============ 3 ============ -->
+<h2 id="s3">3. 解决方案：canonical form 的定义</h2>
+<p>
+  <strong>Canonical form（规范形）</strong>：对 {<code>S</code>, <code>RC(S)</code>} 这一对序列
+  （它们代表同一内容），用一条<strong>确定性规则</strong>选出唯一代表，然后<strong>只存、只查这个代表</strong>。
+</p>
+<p>最常用的规则（minimap2 / rammap 采用的）：取字典序较小的那个。</p>
+
+<pre><code>canon(S) = min(S, RC(S))     // 字典序比较，按碱基编码 A&lt;C&lt;G&lt;T
+
+例（k=3）：
+  S      = ACG
+  RC(S)  = CGT
+  ACG &lt; CGT  ⇒  canon = ACG，strand bit = 0
+
+例（k=3）：
+  S      = CGT
+  RC(S)  = ACG
+  ACG &lt; CGT  ⇒  canon = ACG，strand bit = 1   // 注意：代表相同，bit 不同！</code></pre>
+
+<div class="block key">
+  <div class="title">核心性质</div>
+  <p style="margin:0">
+    无论这段内容在链上以哪种方向出现，<code>canon</code> 计算结果<strong>完全相同</strong>。
+    于是正链上的 <code>ACG</code> 和负链上的 <code>CGT</code> 在 hash 空间里变成同一个 key——
+    一次查找即可覆盖两个方向。
+  </p>
+</div>
+
+<p>"canonical"（规范的、经典的）这个名字的含义：一个等价类里被规则钦定的
+<strong>唯一规范代表</strong>。就像规定"集合 {+1, −1} 的规范代表是 +1"一样——
+代表不唯一才需要规则，规则确定之后等价类内所有成员归一到同一点。</p>
+
+<!-- ============ 4 ============ -->
+<h2 id="s4">4. 为什么有效：等价类与确定性代表</h2>
+
+<h3>4.1 严格论证（两行）</h3>
+<p>需要证明：<code>canon(S) == canon(T)</code> 当且仅当 <code>S == T</code> 或 <code>S == RC(T)</code>。</p>
+<ul>
+  <li><strong>⇒ 方向</strong>：若 <code>canon(S) == canon(T) == C</code>，则 S、T 各自属于
+      {C, RC(C)}，所以 <code>S == T</code>（同向）或 <code>S == RC(T)</code>（反向）。</li>
+  <li><strong>⇐ 方向</strong>：若 <code>S == T</code>，显然 canon 相等；若 <code>S == RC(T)</code>，
+      则 <code>RC(S) == RC(RC(T)) == T</code>，于是 {S, RC(S)} == {T, RC(T)}，
+      两个集合相同 ⇒ 取 min 结果相同。</li>
+</ul>
+<p>注意其中用到的关键恒等式：<code>RC(RC(x)) = x</code>（反向互补是 involution，做两次回到自身）。</p>
+
+<h3>4.2 一图看懂等价类</h3>
+<div class="flow">
+  <div class="flow-step">query 正链出现 <code>ACG</code> → 算 canon：<code>min(ACG, CGT) = ACG</code>，bit 0</div>
+  <div class="flow-arrow">↓ hash 相同，互相命中</div>
+  <div class="flow-step">index（负链读出）出现 <code>CGT</code> → 算 canon：<code>min(CGT, ACG) = ACG</code>，bit 1</div>
+  <div class="flow-arrow">↓</div>
+  <div class="flow-step">命中一个 anchor；相对方向 = bit<sub>query</sub> ⊕ bit<sub>ref</sub> = 0 ⊕ 1 = <strong>反向匹配</strong></div>
+</div>
+
+<p>两种朴素方案（双份索引 / 双向查询）能做的事，canonical form 用
+<strong>1 次 hash 计算 + 1 次查找 + 1 bit 存储</strong>就做到了。</p>
+
+<!-- ============ 5 ============ -->
+<h2 id="s5">5. 交互式演示</h2>
+<p>输入一个 k-mer（只用 A/C/G/T，长度 4–12），看它的正向形式、反向互补、canonical form 和 strand bit：</p>
+
+<div class="demo">
+  <h3>K-mer Canonical 化演示</h3>
+  <input type="text" id="kmerInput" placeholder="例如 ACGTACGT" maxlength="12" spellcheck="false">
+  <button onclick="runDemo()">分析</button>
+  <div class="result" id="kmerResult" style="display:none">
+    <div class="row"><span class="label">正向 k-mer (kmer[0])</span><span class="seq hl-fwd" id="rFwd"></span></div>
+    <div class="row"><span class="label">反向互补 (kmer[1])</span><span class="seq hl-rev" id="rRev"></span></div>
+    <div class="row"><span class="label">canonical form</span><span class="seq hl-can" id="rCan"></span></div>
+    <div class="row"><span class="label">strand bit (z)</span><span id="rStrand"></span></div>
+    <div class="row"><span class="label">判断</span><span id="rNote" style="font-family:inherit"></span></div>
+  </div>
+</div>
+
+<div class="demo">
+  <h3>双向匹配演示：为什么一次查找能命中两个方向</h3>
+  <p style="margin-top:0">
+    输入两段 k-mer（可以故意一正一反），看它们是否被 canonical 化归一：
+  </p>
+  <input type="text" id="kmerA" placeholder="第一段，如 ACGT" maxlength="12" spellcheck="false">
+  <input type="text" id="kmerB" placeholder="第二段，如 ACGT 的反向互补 ACGT" maxlength="12" spellcheck="false" style="margin-top:8px">
+  <button onclick="runMatch()">比较</button>
+  <div class="result" id="matchResult"></div>
+</div>
+
+<script>
+const ENC = {A:0, C:1, G:2, T:3};
+const DEC = "ACGT";
+
+function clean(s){ return s.toUpperCase().replace(/[^ACGT]/g, ""); }
+
+function revcomp(s){
+  let out = "";
+  for (let i = s.length - 1; i >= 0; i--) out += DEC[3 - ENC[s[i]]];
+  return out;
+}
+
+function analyze(s){
+  const rc = revcomp(s);
+  const canon = s < rc ? s : rc;   // JS 字符串比较即字典序；此处用 A<C<G<T 序
+  const strand = s <= rc ? 0 : 1;
+  return {s, rc, canon, strand};
+}
+
+function runDemo(){
+  const raw = document.getElementById("kmerInput").value;
+  const s = clean(raw);
+  const out = document.getElementById("kmerResult");
+  if (s.length < 2) {
+    out.style.display = "block";
+    document.getElementById("rNote").innerHTML = '<span class="error">请输入至少 2 个 ACGT 碱基</span>';
+    ["rFwd","rRev","rCan"].forEach(id => document.getElementById(id).textContent = "");
+    document.getElementById("rStrand").textContent = "";
+    return;
+  }
+  const a = analyze(s);
+  out.style.display = "block";
+  document.getElementById("rFwd").textContent = a.s;
+  document.getElementById("rRev").textContent = a.rc;
+  document.getElementById("rCan").textContent = a.canon;
+  document.getElementById("rStrand").textContent = a.strand + (a.strand === 0 ? "（正向是规范形）" : "（反向互补是规范形）");
+  document.getElementById("rNote").innerHTML =
+    a.s === a.rc
+      ? '<span class="error">对称 k-mer：正向 == 反向互补，无信息量。sketch.rs:253 会直接跳过它！</span>'
+      : '输入形式无关紧要——无论你输入的是哪条链的读法，hash key 都由 canonical form 决定。';
+}
+
+function runMatch(){
+  const a = analyze(clean(document.getElementById("kmerA").value));
+  const b = analyze(clean(document.getElementById("kmerB").value));
+  const out = document.getElementById("matchResult");
+  if (a.s.length < 2 || b.s.length < 2 || a.s.length !== b.s.length) {
+    out.innerHTML = '<span class="error">两段都需要是 ACGT 碱基，且长度相同（≥2）</span>';
+    return;
+  }
+  const match = a.canon === b.canon;
+  const rel = a.strand ^ b.strand;
+  out.innerHTML = `
+    <div class="row"><span class="label">第一段 canonical</span><span class="seq hl-can">${a.canon}</span>（bit ${a.strand}）</div>
+    <div class="row"><span class="label">第二段 canonical</span><span class="seq hl-can">${b.canon}</span>（bit ${b.strand}）</div>
+    <div class="row"><span class="label">hash 是否相等</span><span style="color:${match ? 'var(--green)' : 'var(--red)'}">${match ? "相等 → 会命中，产出 anchor" : "不等 → 不会命中"}</span></div>
+    <div class="row"><span class="label">相对方向（XOR）</span><span>${a.strand} ⊕ ${b.strand} = <strong>${rel}</strong>（0 = 同向，1 = 反向）</span></div>
+    <div class="row"><span class="label">说明</span><span style="font-family:inherit">试试：A 输 ACGT，B 输 ACGT 的反向互补 ${revcomp("ACGT")}</span></div>`;
+}
+</script>
+
+<!-- ============ 6 ============ -->
+<h2 id="s6">6. 代价与额外收获：strand bit</h2>
+
+<h3>6.1 代价（非常小）</h3>
+<ul>
+  <li>每个 minimizer 多存 1 bit 的 strand 信息（放进 <code>y</code> 的最低位：<code>y = pos &lt;&lt; 1 | strand</code>）。</li>
+  <li>sketch 时每个位置要同时计算正向 k-mer 和它的 RC——但两者本来就是用一个滚动编码同时维护的（<code>sketch.rs:251-252</code>），几乎没有额外开销。</li>
+  <li>对称 k-mer（<code>kmer[0] == kmer[1]</code>，即回文）会被跳过：它没有方向信息，反正也匹配不到有用的位置。</li>
+</ul>
+
+<h3>6.2 额外收获：方向信息没有丢</h3>
+<p>
+  canonical 化把绝对方向抹掉了，但选择过程本身留下了痕迹——strand bit。前面已经论证：
+</p>
+<pre><code>相对方向 = strand_query ⊕ strand_ref
+  0 → 两个序列同向对齐 → 产出"正向 anchor"
+  1 → 反向对齐           → 产出"反向 anchor"（坐标反转 + MSB 置位）</code></pre>
+<p>
+  换句话说：<strong>hash 层不区分方向（这是我们要的，为了省一倍查找），
+  strand bit 层记录方向（这是我们所需要的，为了正确 report）</strong>。
+  信息没有被扔掉，只是被延迟到 anchor 编码阶段才使用。
+</p>
+
+<!-- ============ 7 ============ -->
+<h2 id="s7">7. 在 rammap / minimap2 中的完整落地</h2>
+<p>把前面所有环节串起来，就是 rammap seeding 的完整数据流：</p>
+
+<table>
+  <tr><th class="zh">阶段</th><th class="zh">做什么</th><th>代码位置</th></tr>
+  <tr>
+    <td class="zh">sketch（query 和 ref 通用）</td>
+    <td class="zh">每位置算 kmer[0]、kmer[1]，取较小者为 canonical，记 strand bit 进 y</td>
+    <td><code>sketch.rs:251-261</code></td>
+  </tr>
+  <tr>
+    <td class="zh">建索引</td>
+    <td class="zh">reference minimizer 按 canonical hash 存桶，命中记录带 ref strand 位</td>
+    <td><code>index.rs</code></td>
+  </tr>
+  <tr>
+    <td class="zh">seed collection</td>
+    <td class="zh">对每个命中比较 <code>q_strand != r_strand</code>：同向 → 正向 anchor；反向 → anchor 编码 <code>1&lt;&lt;63</code> 且 query 坐标反转</td>
+    <td><code>seed.rs:393-417</code></td>
+  </tr>
+  <tr>
+    <td class="zh">排序</td>
+    <td class="zh">按 x（MSB=strand）radix sort，数组自然分成"正向块 + 反向块"</td>
+    <td><code>sort.rs:115</code></td>
+  </tr>
+  <tr>
+    <td class="zh">chaining DP</td>
+    <td class="zh">在反转坐标系里，反向链与正向链同样单调递增 → 一遍 DP 同时处理两个方向</td>
+    <td><code>chain.rs</code></td>
+  </tr>
+</table>
+
+<div class="block key">
+  <div class="title">整体等价性</div>
+  <p style="margin:0">
+    这套设计与"对两个方向分别建索引、分别 seed、分别 chain"在<strong>结果上完全等价</strong>，
+    但只用了后者一半的索引内存和一半的查询次数。正确性由第 4 节的等价类论证保证；
+    方向恢复由 strand bit 的 XOR 性质保证；反向链可 chain 则由坐标反转的保序性保证。
+  </p>
+</div>
+
+<!-- ============ 8 ============ -->
+<h2 id="s8">8. 常见疑问</h2>
+
+<h3>Q1：为什么选"字典序最小"，而不是别的规则（比如取 hash 较小者）？</h3>
+<p>
+  任何<strong>确定性</strong>规则都行——正确性只要求"等价类内成员归一到同一点"，与具体选哪个无关。
+  选字典序最小的原因：(a) 计算零成本，比较两个已编码的整数即可；(b) 与 hash 函数解耦，
+  不会让 hash 分布特性影响 canonical 选择；(c) 同一规则天然适用于所有 k。
+</p>
+
+<h3>Q2：回文 k-mer（S == RC(S)）怎么办？</h3>
+<p>
+  当 k 为偶数时可能出现，如 <code>ACGT</code>。它无法提供方向信息（strand bit 无意义），
+  而且 <code>sketch.rs:253</code> 干脆跳过它。实践中回文 k-mer 极少且信息量低，丢弃无碍。
+</p>
+
+<h3>Q3：canonical form 会不会增加碰撞（不同序列映射到同一 key）？</h3>
+<p>
+  不会引入额外碰撞。canon 是一个函数：<code>canon(S) == canon(T) ⇒ S==T 或 S==RC(T)</code>。
+  也就是说两个不同"内容"的 k-mer 的 canon 必不相同（哈希碰撞除外，而哈希碰撞本来就存在，
+  与 canonical 化无关）。它只是把"等价但写法不同"归并了，没有把"不同内容"归并。
+</p>
+
+<h3>Q4：RNA（如转录组比对）也这样吗？</h3>
+<p>
+  minimap2 处理 mRNA 时用 <code>--splice</code>，原理相同：仍需处理两个方向的匹配
+  （转录本可能来自任一条链），canonical minimizer 一样适用；差别在下游
+  （剪接位点的 gap 罚分等）。此外 rammap 还有一个 <code>QSTRAND</code> 模式
+  （<code>seed.rs:403-409</code>）：保持 query 坐标不反转、改为反转 reference 坐标，
+  用于需要保留 query 原始方向的短读场景——变的是"反转谁"，不变的是 canonical 化本身。
+</p>
+
+<h3>Q5：一句话总结？</h3>
+<div class="block">
+  <p style="margin:0">
+    <strong>Canonical form = 对"序列及其反向互补"这个二元素等价类做确定性归一化的唯一代表。</strong>
+    它解决的问题是：双链世界里"同一内容、两种写法"导致的 hash 匹配失败——办法是让两种写法
+    在 hash 空间不可区分，同时用 1 个 strand bit 保留恢复相对方向所需的全部信息。
+  </p>
+</div>
+
+<footer>
+  rammap 源码导读系列 · 涉及文件：rammap-core/src/align/{sketch.rs, seed.rs, sort.rs, chain.rs, map.rs}
+</footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>rammap 比对管线详解 — 从 minimizer 到 PAF（low_complexity 实例）</title>
+<style>
+  :root {
+    --bg: #fafaf7; --card: #ffffff; --ink: #1f2430; --muted: #6b7280;
+    --accent: #0e7c66; --accent2: #b45309; --code-bg: #f4f4f0;
+    --best: #0e7c66; --other: #d97706; --rest: #9ca3af;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+         background: var(--bg); color: var(--ink); margin: 0; line-height: 1.75; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 80px; }
+  header.hero { border-bottom: 3px solid var(--accent); padding-bottom: 20px; margin-bottom: 28px; }
+  header.hero h1 { margin: 0 0 8px; font-size: 28px; }
+  header.hero p.sub { color: var(--muted); margin: 0; font-size: 15px; }
+  h2 { font-size: 22px; margin: 48px 0 12px; padding-top: 10px; border-top: 1px solid #e5e7eb; }
+  h2 .stepno { color: var(--accent); font-weight: 700; margin-right: 8px; }
+  h3 { font-size: 17px; margin: 24px 0 8px; }
+  p, li { font-size: 15px; }
+  .card { background: var(--card); border: 1px solid #e5e7eb; border-radius: 10px;
+          padding: 18px 22px; margin: 14px 0; box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+  .note { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
+  .good { background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
+  .warn { background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
+  code { background: var(--code-bg); border-radius: 4px; padding: 1px 5px; font-family: "SF Mono", Consolas, monospace; font-size: 13px; }
+  pre { background: #1f2430; color: #e5e7eb; border-radius: 8px; padding: 14px 16px; overflow-x: auto;
+        font-family: "SF Mono", Consolas, monospace; font-size: 13px; line-height: 1.55; }
+  pre .cmt { color: #94a3b8; } pre .hl { color: #6ee7b7; font-weight: bold; } pre .num { color: #fca5a5; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid #e5e7eb; padding: 6px 10px; text-align: left; }
+  th { background: #f0fdf4; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .formula { background: var(--code-bg); border-left: 4px solid var(--accent); padding: 10px 16px;
+             margin: 10px 0; font-family: Georgia, serif; font-size: 16px; }
+  .toc { background: var(--card); border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px 22px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc ol { margin: 6px 0; padding-left: 22px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; font-size: 14px; margin: 8px 0; }
+  .kv .k { color: var(--muted); }
+  .plot { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; }
+  .plot .legend { display: flex; gap: 18px; font-size: 13px; color: var(--muted); padding: 4px 8px; flex-wrap: wrap; }
+  .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .ctrl { font-size: 13px; color: var(--muted); padding: 2px 8px 8px; }
+  .ctrl label { margin-right: 14px; cursor: pointer; }
+  footer { margin-top: 60px; color: var(--muted); font-size: 13px; border-top: 1px solid #e5e7eb; padding-top: 14px; }
+  .tag { display: inline-block; background: #e6f4f1; color: var(--accent); border-radius: 4px;
+         padding: 0 8px; font-size: 12px; margin-right: 6px; font-family: monospace; }
+  svg text { font-family: "SF Mono", Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>rammap 比对管线详解 — 从 minimizer 到 PAF</h1>
+  <p class="sub">以 low_complexity 组的一条真实 read 为例，逐步走通 Sketch → Seed → Anchor → DP Chain → Alignment 全流程。<br>
+  实验设置：<code>-x map-ont -k 12 -w 5 --no-long-join</code>，单线程。所有数字均来自对 rammap 管线的逐行复现（校验见附录 C）。</p>
+</header>
+
+<nav class="toc">
+  <b>目录</b>
+  <ol>
+    <li><a href="#s1">背景与示例数据</a></li>
+    <li><a href="#s2">管线总览</a></li>
+    <li><a href="#s3">Step 1 — Sketching：minimizer 提取</a></li>
+    <li><a href="#s4">Step 2 — Seeding：索引查找与 anchor 构建</a></li>
+    <li><a href="#s5">Step 3 — DP Chaining：动态规划链化（本篇核心）</a></li>
+    <li><a href="#s6">Step 4 — RMQ rescue：为什么被跳过</a></li>
+    <li><a href="#s7">Step 5 — 后链处理与比对输出（PAF 逐字段解码）</a></li>
+    <li><a href="#s8">Chaining 负载分析：为什么组1 慢</a></li>
+    <li><a href="#s9">附录：参数表 / 代码索引 / 复现校验</a></li>
+  </ol>
+</nav>
+
+<!-- ================================================================ -->
+<h2 id="s1"><span class="stepno">1</span>背景与示例数据</h2>
+
+<div class="card">
+  <p>本教程使用 <b>组1（low_complexity）</b> 数据集：61 条 Nanopore 风格的 query 比对到 1 条 1,611 bp 的低复杂度 target 上。
+  为了讲清楚每一步，我们全程跟踪其中一条真实 read：</p>
+  <div class="kv">
+    <span class="k">query</span><span><code>read_11681/11681/subread/0</code>，长度 <b>1,649 bp</b></span>
+    <span class="k">target</span><span><code>ref</code>，长度 <b>1,611 bp</b>（索引含 524 个 minimizer，415 个不同 hash）</span>
+    <span class="k">参数</span><span>k = 12，w = 5，preset map-ont，<code>--no-long-join</code>（关闭 RMQ rescue）</span>
+    <span class="k">最终结果</span><span>正链比对，query 23–1646，target 59–1608，MAPQ 60</span>
+  </div>
+  <p>这条 read 序列的开头（注意大量 <code>TTCC/CCTT</code> 重复 —— 这正是"低复杂度"的来源）：</p>
+  <pre><span class="cmt">seq[0..60] =</span> AATGTAGGAAACGATCCTTCTTCTCCCCTTCTTCTTCTCCCTTCCTCCTCCTTCCCCCTC</pre>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s2"><span class="stepno">2</span>管线总览</h2>
+
+<div class="card">
+<svg viewBox="0 0 980 150" width="100%" height="150">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="#6b7280"/>
+    </marker>
+  </defs>
+  <g font-size="13">
+    <rect x="10"  y="40" width="130" height="50" rx="8" fill="#ecfdf5" stroke="#0e7c66"/>
+    <text x="75"  y="60" text-anchor="middle" font-weight="bold">① Sketching</text>
+    <text x="75"  y="78" text-anchor="middle" fill="#6b7280" font-size="11">query → 557 minimizers</text>
+
+    <rect x="175" y="40" width="140" height="50" rx="8" fill="#ecfdf5" stroke="#0e7c66"/>
+    <text x="245" y="60" text-anchor="middle" font-weight="bold">② Seeding</text>
+    <text x="245" y="78" text-anchor="middle" fill="#6b7280" font-size="11">索引查找 → 652 anchors</text>
+
+    <rect x="350" y="40" width="150" height="50" rx="8" fill="#ecfdf5" stroke="#b45309"/>
+    <text x="425" y="60" text-anchor="middle" font-weight="bold">③ DP Chaining</text>
+    <text x="425" y="78" text-anchor="middle" fill="#6b7280" font-size="11">8 条链，最优 1074 分</text>
+
+    <rect x="535" y="40" width="140" height="50" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-dasharray="4 3"/>
+    <text x="605" y="60" text-anchor="middle" font-weight="bold" fill="#9ca3af">④ RMQ rescue</text>
+    <text x="605" y="78" text-anchor="middle" fill="#9ca3af" font-size="11">已禁用 (no-long-join)</text>
+
+    <rect x="710" y="40" width="115" height="50" rx="8" fill="#ecfdf5" stroke="#0e7c66"/>
+    <text x="767" y="60" text-anchor="middle" font-weight="bold">⑤ Filter+Ext</text>
+    <text x="767" y="78" text-anchor="middle" fill="#6b7280" font-size="11">CIGAR / MAPQ</text>
+
+    <rect x="858" y="40" width="110" height="50" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <text x="913" y="60" text-anchor="middle" font-weight="bold">PAF 输出</text>
+    <text x="913" y="78" text-anchor="middle" fill="#6b7280" font-size="11">1 行 / 比对</text>
+
+    <line x1="140" y1="65" x2="172" y2="65" stroke="#6b7280" marker-end="url(#arr)"/>
+    <line x1="315" y1="65" x2="347" y2="65" stroke="#6b7280" marker-end="url(#arr)"/>
+    <line x1="500" y1="65" x2="532" y2="65" stroke="#6b7280" marker-end="url(#arr)"/>
+    <line x1="675" y1="65" x2="707" y2="65" stroke="#6b7280" marker-end="url(#arr)"/>
+    <line x1="825" y1="65" x2="855" y2="65" stroke="#6b7280" marker-end="url(#arr)"/>
+    <line x1="605" y1="40" x2="605" y2="18" stroke="#9ca3af" stroke-dasharray="3 3"/>
+    <text x="605" y="14" text-anchor="middle" fill="#9ca3af" font-size="11">跳过</text>
+  </g>
+</svg>
+<p>每一步的耗时占比（组1 全部 61 条 read，单线程）：Sketching ≈ 10%，Seeding ≈ 8%，<b>Chaining ≈ 70%</b>，Alignment ≈ 0%（种子扩展几乎不耗时），其余为后链过滤。</p>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s3"><span class="stepno">3</span>Step 1 — Sketching：minimizer 提取</h2>
+
+<div class="card">
+<h3>3.1 原理</h3>
+<p>序列不能直接存进索引，需要先压缩成一组"代表 k-mer"。rammap 使用与 minimap2 完全一致的
+<b>(w, k)-minimizer</b> 方案（<code>sketch.rs::sketch_sequence_impl</code>）：</p>
+<ol>
+  <li>把序列按窗口滑动，每个位置得到一个 k-mer（k = 12）及其反向互补 k-mer，取<b>字典序较小的那个</b>作为正则形式（这样无论序列出现在哪条链都能命中同一个 hash）；对称 k-mer 被跳过。</li>
+  <li>对正则 k-mer 的 2-bit 编码应用一个可逆混合哈希 <code>kmer_hash</code>（minimap2 同款）。</li>
+  <li>在宽度为 w = 5 的窗口内，<b>哈希值最小的 k-mer 被选为 minimizer</b>；哈希相同则取最靠右的。</li>
+</ol>
+<p>直觉：普通 k-mer 索引每 ~1 bp 存一个条目；minimizer 的密度约为 <b>2/(w+1) = 1/3</b>，即每 3 bp 一个，
+存储和查找成本降为 1/3，而只要两条序列共享的片段 ≥ w+k−1 = 16 bp，就必然共享至少一个 minimizer。</p>
+
+<h3>3.2 示例 read 的真实数字</h3>
+<p>这条 1,649 bp 的 read 产生了 <b>557 个 minimizer</b>（密度 1/2.96，正好符合理论值）。例如：</p>
+<table>
+  <tr><th>query 位置</th><th>链</th><th>k-mer（12 bp）</th><th>hash（10 进制）</th><th>备注</th></tr>
+  <tr><td class="num">11</td><td>+</td><td><code>CGATCCTTCTTC</code></td><td class="num">2,256,433</td><td>read 的第 1 个 minimizer</td></tr>
+  <tr><td class="num">16</td><td>+</td><td><code>CTTCTTCTCCCC</code></td><td class="num">1,117,196</td><td></td></tr>
+  <tr><td class="num">18</td><td>−</td><td>窗口 k-mer <code>TCTTCTCCCCTT</code> → 正则形式为其反向互补 <code>AAGGGAGAAGA</code></td><td class="num">1,217,054</td><td>链位 = 1：正则形式取的是 reverse complement</td></tr>
+  <tr><td class="num">20</td><td>+</td><td>—</td><td class="num">6,089,088</td><td></td></tr>
+  <tr><td class="num">23</td><td>−</td><td>—</td><td class="num">6,933,109</td><td></td></tr>
+</table>
+
+<div class="note">
+<b>两个细化规则</b>（与 minimap2 一致）：
+① 连续相同哈希的 tandem minimizer 会被一起输出；
+② <code>q_occ_frac = 0.01</code>：如果某个 k-mer 在 <b>query 自身内部</b>出现超过 max(15, 1%×n) 次，会被丢弃（防止 read 内部 tandem repeat 淹没索引查找）。本例 557 个 minimizer 全部保留，未触发过滤。
+</div>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s4"><span class="stepno">4</span>Step 2 — Seeding：索引查找与 anchor 构建</h2>
+
+<div class="card">
+<h3>4.1 索引里有什么</h3>
+<p>建索引时对 target 同样做 minimizer sketch：1,611 bp 的 target 得到 524 个 minimizer。
+索引是一个 hash 表：<code>hash → 该 hash 在 target 上的所有出现位置</code>（附带链位）。
+524 个 minimizer 只对应 415 个不同 hash：41 个 hash 出现了多次，合计多出 109 个重复条目 —— 这就是低复杂度序列的"重复种子"来源。</p>
+
+<h3>4.2 查找与 occ 过滤</h3>
+<p>对 read 的 557 个 minimizer 逐个查 hash，得到 <b>254 个"有命中"的种子</b>（303 个在 target 上不存在，直接丢弃）。
+每个种子记录它的 <code>hit_count</code>（在 target 中的出现次数）。这条 read 的命中次数分布：</p>
+<table>
+  <tr><th>hit_count</th><td class="num">1</td><td class="num">2</td><td class="num">3</td><td class="num">4</td><td class="num">7</td><td class="num">9</td><td class="num">10</td><td class="num">11</td><td class="num">14</td></tr>
+  <tr><th>种子数</th><td class="num">180</td><td class="num">22</td><td class="num">10</td><td class="num">8</td><td class="num">8</td><td class="num">3</td><td class="num">3</td><td class="num">9</td><td class="num">11</td></tr>
+</table>
+<p>过滤阈值 <code>mid_occ = 15</code>（由索引自动标定：取 hash 出现次数分布的 99.98 分位（frac = 0.0002）的计数再加 1，下限 10；本例恰好落在最大 occ 14 + 1 = 15）。
+<b>所有种子的 hit_count ≤ 14，无一被过滤</b>；<code>select_seeds</code> 的高频种子救援逻辑也因"不存在高频种子"而直接返回。
+低复杂度数据在这里"逃过一劫"——如果 target 再长一点、重复再多一点，就会有种子被过滤。</p>
+
+<h3>4.3 anchor 构建</h3>
+<p>每个保留种子 × 每个索引命中 = 一个 <b>anchor</b>（种子匹配对）。总计
+<span style="font-size:16px"><b>652 个 anchor</b></span>（180×1 + 22×2 + … + 11×14 = 652），编码为 128-bit 的
+<code>Minimizer { x, y }</code>：</p>
+<div class="formula">
+x = <i>ref_pos</i>（正向命中）或 2<sup>63</sup> | <i>ref_pos</i>（反向命中）&nbsp;&nbsp;——&nbsp; 低 32 位，高 32 位 = rid<br>
+y = <i>k</i>-span ≪ 32 | <i>query_pos</i>（反向命中时 query_pos 做镜像变换，保证链化时"query 单调递增"对两条链都成立）
+</div>
+<p>最后 anchor 按 x（ref 位置）做一次 <b>不稳定的 MSD 基数排序</b>（<code>sort.rs::radix_sort_128x</code>），
+为 DP 链化做准备。这条 read 的 652 个 anchor 中 646 个落在正链、6 个落在负链（负链的少量散点纯属低复杂度随机命中）。</p>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s5"><span class="stepno">5</span>Step 3 — DP Chaining：动态规划链化</h2>
+
+<div class="card">
+<p>链化的目标：把 652 个散乱的 anchor 点连成若干条"共线链"（colinear chain）——
+即 ref 和 query 位置都单调递增、间距合理的 anchor 序列。这是整个管线中<b>计算量最大的一步</b>（组1 中占 ~70% 时间）。</p>
+
+<h3>5.1 输入排序与扫描窗口</h3>
+<p>anchor 已按 (ref_id_strand, ref_pos) 排序。DP 逐个处理 anchor <code>i</code>，向后扫描候选前驱
+<code>j</code>（从 i−1 往回）。窗口受三个条件限制：</p>
+<ul>
+  <li><code>ref_id_strand</code> 不同 → 出窗（正/负链的 anchor 永不混合）；</li>
+  <li><code>a[i].x − a[j].x &gt; max_dist_x = 5000</code> → 出窗；</li>
+  <li>窗口内 anchor 数 &gt; max_chain_iter = 5000 → 截断。</li>
+</ul>
+<div class="warn">
+<b>关键观察</b>：本实验的 target 只有 1,611 bp，而 <code>max_dist_x = 5000</code> ——
+<b>窗口永远不会收缩，每条 read 的全部 anchor 都在彼此的窗口内</b>。这是后面"负载问题"的根源之一。
+在真实基因组（ Mb 级 contig）上，窗口只包含 5 kb 范围内的 anchor，密度低得多。
+</div>
+
+<h3>5.2 打分函数</h3>
+<p>对候选前驱对 (i, j)，<code>chain.rs::compute_chain_score</code> 计算"从 j 接到 i"的增量分：</p>
+<div class="formula">
+qd = q<sub>i</sub> − q<sub>j</sub>（query 间距）， rd = r<sub>i</sub> − r<sub>j</sub>（ref 间距）， gw = |rd − qd|（gap 宽度）<br><br>
+<em>先做合法性检查（不满足返回 −∞）：</em> qd &gt; 0；rd ≠ 0；qd ≤ 5000；同链时 gw ≤ bw(500)<br><br>
+sc = min(<i>k</i>-span<sub>j</sub>, min(rd, qd)) − ⌊<i>pen</i>(gw)⌋<br>
+<i>pen</i>(gw) = <span class="tag">chn_pen_gap</span>·gw + ½·log₂(gw+1)　（chn_pen_gap = 0.8 × 0.01 × k = <b>0.096</b>，由 <code>finalize_options</code> 按实际 k 算出；chn_pen_skip = 0）<br>
+<span style="font-size:13px;color:var(--muted)">⌊·⌋ 为向零截断（Rust <code>as i32</code>），惩罚恒为正，等价于向下取整</span>
+</div>
+<p>即：<b>奖励</b> = 重叠长度（最多记 k-span = 12 分），<b>惩罚</b> = 线性 gap 罚 + 半个对数罚。
+三个真实算例（取自最优链相邻 anchor）：</p>
+<table>
+  <tr><th>转移</th><th>rd</th><th>qd</th><th>gw</th><th>基础分 min(12, md)</th><th>线性罚 0.096·gw</th><th>log 罚 ½·log₂(gw+1)</th><th>总罚 ⌈⌉</th><th>sc</th></tr>
+  <tr><td>(70,34)→(110,76)</td><td class="num">40</td><td class="num">42</td><td class="num">2</td><td class="num">12</td><td class="num">0.192</td><td class="num">0.793</td><td class="num">0</td><td class="num"><b>12</b></td></tr>
+  <tr><td>(110,76)→(115,81)</td><td class="num">5</td><td class="num">5</td><td class="num">0</td><td class="num">5</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num"><b>5</b></td></tr>
+  <tr><td>(115,81)→(160,133)</td><td class="num">45</td><td class="num">52</td><td class="num">7</td><td class="num">12</td><td class="num">0.672</td><td class="num">1.502</td><td class="num">2</td><td class="num"><b>10</b></td></tr>
+</table>
+<p>注意第一个例子：2 bp 的小 gap 罚分不足 1 分，经截断后<b>完全免罚</b> —— 这是刻意设计，让链容忍测序错误造成的小 indel。</p>
+
+<h3>5.3 DP 递推：一个真实的邻域</h3>
+<p>每个 anchor 的 DP 分数 <code>scores[i] = max(自身span, max_j(sc(i,j) + scores[j]))</code>，
+并记录最优前驱 <code>preds[i]</code>。看 anchor #17（r=115, q=81）向后扫描时看到的候选（真实数据）：</p>
+<table>
+  <tr><th>候选 j</th><th>ref</th><th>query</th><th>scores[j]</th><th>sc(17,j)</th><th>总分</th><th>判定</th></tr>
+  <tr><td class="num">16</td><td class="num">115</td><td class="num">421</td><td class="num">17</td><td>MIN</td><td>—</td><td>qd = 81−421 &lt; 0，非法</td></tr>
+  <tr><td class="num">15</td><td class="num">110</td><td class="num">154</td><td class="num">29</td><td>MIN</td><td>—</td><td>qd &lt; 0，非法</td></tr>
+  <tr><td class="num">14</td><td class="num">110</td><td class="num">416</td><td class="num">12</td><td>MIN</td><td>—</td><td>qd &lt; 0，非法</td></tr>
+  <tr><td class="num" style="background:#ecfdf5"><b>13</b></td><td class="num">110</td><td class="num">76</td><td class="num">24</td><td class="num">5</td><td class="num"><b>29</b></td><td style="background:#ecfdf5"><b>最优前驱 ✓</b></td></tr>
+  <tr><td class="num">12</td><td class="num">93</td><td class="num">138</td><td class="num">17</td><td>MIN</td><td>—</td><td>qd &lt; 0</td></tr>
+  <tr><td class="num">11</td><td class="num">93</td><td class="num">558</td><td class="num">28</td><td>MIN</td><td>—</td><td>qd &lt; 0</td></tr>
+</table>
+<p>最终 scores[17] = 29，preds[17] = 13。可以看到：<b>6 个候选里 5 个因为 query 位置"倒挂"直接非法</b> ——
+低复杂度序列的 anchor 在 ref 上密集堆积，但在 query 上方向混乱，这就是组1 扫描成本高的直接原因（见 5.4）。</p>
+
+<h3>5.4 提前终止：visited / skip-break 机制（逐步详解）</h3>
+<p>如果每次都要扫完整个窗口，DP 就是严格 O(n²)。minimap2 式的提前终止依赖一个巧妙的计数器：</p>
+<pre><span class="cmt">// chain.rs:412-432（简化）</span>
+for j in (<span class="hl">window_start..i</span>).rev() {
+    sc = compute_chain_score(i, j);
+    if sc == MIN { <span class="hl">continue</span>; }          <span class="cmt">// 非法候选：不计 skip、也不做 visited 标记！</span>
+    total = sc + scores[j];
+    if total &gt; best { best = total; pred = j;
+       if skip &gt; 0 { <span class="hl">skip -= 1</span>; } }     <span class="cmt">// 改善：撤销一次"放弃倾向"</span>
+    <span class="hl">else if visited[j] == i</span> {           <span class="cmt">// j 在本次扫描中已作为"某条链路径的上游"出现过</span>
+        skip += 1;
+        if skip &gt; max_chain_skip(<span class="num">25</span>) { <span class="hl">break</span>; }
+    }
+    if preds[j] &gt;= 0 { <span class="hl">visited[preds[j]] = i</span>; }  <span class="cmt">// 把 j 的前驱登记为"本轮已路过"</span>
+}</pre>
+
+<h4>5.4.1 每个候选只有四种结局</h4>
+<table>
+  <tr><th>结局</th><th>触发条件</th><th>skip 变化</th><th>visited 标记</th><th>本质</th></tr>
+  <tr><td style="color:#9ca3af"><b>MIN</b></td><td>sc = −∞（qd ≤ 0、rd == 0、gw &gt; bw…）</td><td>不变</td><td><b>不做</b>（continue 在标记之前）</td><td>打分白算，连计数资格都没有</td></tr>
+  <tr><td style="color:var(--accent)"><b>IMPROVE</b></td><td>total &gt; 当前 best</td><td><b>−1</b>（仅当 &gt;0）</td><td>做</td><td>找到更好前驱，"放弃倾向"被部分撤销</td></tr>
+  <tr><td style="color:var(--accent2)"><b>SKIP+1</b></td><td>无改善 且 visited[j] == i</td><td><b>+1</b>；&gt;25 → <b>break</b></td><td>做</td><td>撞见一条"已经评估过的链路径"</td></tr>
+  <tr><td style="color:#9ca3af"><b>no-effect</b></td><td>无改善 且 visited[j] != i</td><td>不变</td><td>做</td><td>最"浪费"的一步：分照算、计数器不动</td></tr>
+</table>
+<div class="note">
+<b>visited 标记的准确语义</b>：处理候选 j 之后执行 <code>visited[preds[j]] = i</code> —— 即"j 的 DP 前驱是本次扫描已经经过的路径节点"。
+之后逆行到某个 j′ 时若 <code>visited[j′] == i</code>，说明 j′ 已经属于本轮评估过的某条链路径 —— 继续沿它向前大概率只是重复已知路径。
+因此 skip &gt; 25 的直觉是：<b>"我已经在 25 个属于已知路径的节点上毫无收获，放弃这片区域"</b>。
+注意计数器只被 IMPROVE 减 1（不是清零），MIN 与 no-effect 完全不参与计数 —— 这两点决定了低复杂度数据的行为（见 5.4.3）。
+</div>
+
+<h4>5.4.2 真实轨迹：组1 anchor #74 的 68 步扫描</h4>
+<p>示例 read 的 anchor #74（r = 165，q = 426，初始分 = k-span = 12）。窗口 [0..73] 全部可用（<code>max_dist_x = 5000</code> 大于整个 target，窗口从未收缩），
+68 步的构成：<span class="tag">5 IMPROVE</span><span class="tag">27 SKIP+1</span><span class="tag">24 MIN</span><span class="tag">12 no-effect</span>，第 68 步 skip = 26 &gt; 25 触发 break（j = 6），j = 5..0 六个 anchor 未被评估。
+最优前驱 = j = 60（r = 153，q = 361，total = 52）。以下表格为<b>逐步真实数据</b>。</p>
+
+<p><b>阶段 A（第 1–14 步）：活跃搜索期</b> —— 连续 IMPROVE，best 从 13 涨到 52：</p>
+<table>
+  <tr><th>步</th><th>j</th><th>r</th><th>q</th><th>scores[j]</th><th>sc</th><th>total</th><th>结局</th><th>skip</th></tr>
+  <tr><td class="num">1</td><td class="num">73</td><td class="num">160</td><td class="num">133</td><td class="num">39</td><td class="num">−26</td><td class="num">13</td><td style="color:var(--accent)">IMPROVE</td><td class="num">0</td></tr>
+  <tr><td class="num">2</td><td class="num">72</td><td class="num">156</td><td class="num">246</td><td class="num">57</td><td class="num">−11</td><td class="num">46</td><td style="color:var(--accent)">IMPROVE</td><td class="num">0</td></tr>
+  <tr><td class="num">3</td><td class="num">71</td><td class="num">156</td><td class="num">313</td><td class="num">54</td><td class="num">−4</td><td class="num">50</td><td style="color:var(--accent)">IMPROVE</td><td class="num">0</td></tr>
+  <tr><td class="num">4</td><td class="num">70</td><td class="num">156</td><td class="num">341</td><td class="num">51</td><td class="num">−1</td><td class="num">50</td><td style="color:#9ca3af">no-effect</td><td class="num">0</td></tr>
+  <tr><td class="num">5</td><td class="num">69</td><td class="num">156</td><td class="num">442</td><td class="num">41</td><td>MIN</td><td>—</td><td style="color:#9ca3af">MIN</td><td class="num">0</td></tr>
+  <tr><td class="num">6</td><td class="num">68</td><td class="num">156</td><td class="num">390</td><td class="num">46</td><td class="num">5</td><td class="num">51</td><td style="color:var(--accent)">IMPROVE</td><td class="num">0</td></tr>
+  <tr><td class="num">7–11</td><td class="num">67…63</td><td class="num">153</td><td class="num">149…468</td><td class="num">36…53</td><td>−17…MIN</td><td>—</td><td>3×MIN, 2×no-effect</td><td class="num">0</td></tr>
+  <tr><td class="num">12</td><td class="num">62</td><td class="num">153</td><td class="num">411</td><td class="num">40</td><td class="num">11</td><td class="num">51</td><td style="color:#9ca3af">no-effect</td><td class="num">0</td></tr>
+  <tr><td class="num">13</td><td class="num">61</td><td class="num">153</td><td class="num">243</td><td class="num">54</td><td class="num">−8</td><td class="num">46</td><td style="color:var(--accent2)">SKIP+1</td><td class="num">1</td></tr>
+  <tr><td class="num">14</td><td class="num"><b>60</b></td><td class="num">153</td><td class="num">361</td><td class="num">47</td><td class="num">5</td><td class="num"><b>52</b></td><td style="color:var(--accent)"><b>IMPROVE</b>（最终前驱）</td><td class="num">0</td></tr>
+</table>
+<p>第 14 步之后 best = 52 再无人超越 —— 剩下的 54 步全部是"陪跑"。</p>
+
+<p><b>阶段 B（第 15–60 步）：计数稀释期</b> —— 46 步里没有一次 IMPROVE，skip 从 0 爬到 23：
+46 步 = <b>23 次 SKIP+1 + 17 次 MIN + 6 次 no-effect</b>（MIN：query 倒挂，连计数资格都没有；no-effect：合法但未被标记过）。
+平均每攒 1 次 skip 要付出 <b>2.0 步</b>的代价（全程平均 2.5 步/次）。抽样展示：</p>
+<table>
+  <tr><th>步</th><th>j</th><th>r</th><th>q</th><th>sc</th><th>结局</th><th>skip</th><th>备注</th></tr>
+  <tr><td class="num">16–17</td><td class="num">58, 57</td><td class="num">153</td><td class="num">310, 338</td><td class="num">−1, 2</td><td style="color:var(--accent2)">SKIP+1 ×2</td><td class="num">1→2</td><td></td></tr>
+  <tr><td class="num">18–19</td><td class="num">56, 55</td><td class="num">152</td><td class="num">438, 818</td><td>MIN</td><td style="color:#9ca3af">MIN ×2</td><td class="num">2</td><td>q 倒挂 → MIN 冻结计数器</td></tr>
+  <tr><td class="num">20–21</td><td class="num">54, 53</td><td class="num">152</td><td class="num">309, 242</td><td class="num">−1, −8</td><td style="color:var(--accent2)">SKIP+1 ×2</td><td class="num">3→4</td><td></td></tr>
+  <tr><td class="num">30</td><td class="num">44</td><td class="num">135</td><td class="num">390</td><td class="num">11</td><td style="color:#9ca3af">no-effect</td><td class="num">8</td><td>11 分也不够追 52</td></tr>
+  <tr><td class="num">38</td><td class="num">36</td><td class="num">132</td><td class="num">243</td><td class="num">−6</td><td style="color:var(--accent2)">SKIP+1</td><td class="num">11</td><td></td></tr>
+  <tr><td class="num">60</td><td class="num">14</td><td class="num">110</td><td class="num">416</td><td class="num">3</td><td style="color:var(--accent2)">SKIP+1</td><td class="num">23</td><td>阶段 B 结束</td></tr>
+</table>
+
+<p><b>阶段 C（第 61–68 步）：临门一脚</b> —— 注意 MIN 和 no-effect 在这里"拖时间"的效果：</p>
+<table>
+  <tr><th>步</th><th>j</th><th>r</th><th>q</th><th>结局</th><th>skip</th><th>备注</th></tr>
+  <tr><td class="num">61</td><td class="num">13</td><td class="num">110</td><td class="num">76</td><td style="color:var(--accent2)">SKIP+1</td><td class="num">24</td><td></td></tr>
+  <tr><td class="num">62</td><td class="num">12</td><td class="num">93</td><td class="num">138</td><td style="color:var(--accent2)">SKIP+1</td><td class="num">25</td><td>再 +1 就 break</td></tr>
+  <tr><td class="num">63</td><td class="num">11</td><td class="num">93</td><td class="num">558</td><td style="color:#9ca3af">MIN</td><td class="num">25</td><td>q 倒挂：不计数，白算一步</td></tr>
+  <tr><td class="num">64</td><td class="num">10</td><td class="num">93</td><td class="num">426</td><td style="color:#9ca3af">MIN</td><td class="num">25</td><td>同上</td></tr>
+  <tr><td class="num">65</td><td class="num">9</td><td class="num">93</td><td class="num">164</td><td style="color:#9ca3af">no-effect</td><td class="num">25</td><td>合法但没被标记过：不计数</td></tr>
+  <tr><td class="num">66</td><td class="num">8</td><td class="num">88</td><td class="num">553</td><td style="color:#9ca3af">MIN</td><td class="num">25</td><td></td></tr>
+  <tr><td class="num">67</td><td class="num">7</td><td class="num">88</td><td class="num">421</td><td style="color:#9ca3af">no-effect</td><td class="num">25</td><td></td></tr>
+  <tr><td class="num" style="background:#fef2f2"><b>68</b></td><td class="num"><b>6</b></td><td class="num">88</td><td class="num">159</td><td style="color:#dc2626"><b>BREAK</b></td><td class="num"><b>26</b></td><td><b>26 &gt; 25 → 放弃，j = 5..0 未评估</b></td></tr>
+</table>
+
+<div class="plot">
+  <div class="ctrl"><b>skip 计数器曲线（68 步真实数据）</b> —— 绿点 = IMPROVE（−1），红点 = BREAK，灰竖线 = MIN / no-effect（计数冻结）</div>
+  <svg id="skipChart" viewBox="0 0 900 260" width="100%"></svg>
+</div>
+
+<h4>5.4.3 对照：组2 干净链的 27 步扫描</h4>
+<p>s_aureus 对照 read 的 anchor #100（r = 825，q = 829）。干净共线链上，j 的 DP 前驱恰好就是下一个要扫描的 j′，
+所以<b>每个合法候选都是 SKIP+1</b>，计数器毫无稀释地笔直上升：</p>
+<table>
+  <tr><th>步</th><th>j</th><th>r</th><th>q</th><th>scores[j]</th><th>sc</th><th>total</th><th>结局</th><th>skip</th></tr>
+  <tr><td class="num">1</td><td class="num">99</td><td class="num">820</td><td class="num">824</td><td class="num">471</td><td class="num">5</td><td class="num"><b>476</b></td><td style="color:var(--accent)">IMPROVE</td><td class="num">0</td></tr>
+  <tr><td class="num">2</td><td class="num">98</td><td class="num">815</td><td class="num">819</td><td class="num">466</td><td class="num">10</td><td class="num">476</td><td style="color:var(--accent2)">SKIP+1</td><td class="num">1</td></tr>
+  <tr><td class="num">3</td><td class="num">97</td><td class="num">765</td><td class="num">772</td><td class="num">455</td><td class="num">11</td><td class="num">466</td><td style="color:var(--accent2)">SKIP+1</td><td class="num">2</td></tr>
+  <tr><td class="num">…</td><td class="num">96…74</td><td class="num">764…656</td><td class="num">771…661</td><td class="num">454…359</td><td class="num">11</td><td>递减</td><td style="color:var(--accent2)">SKIP+1 …</td><td class="num">3→25</td></tr>
+  <tr><td class="num" style="background:#fef2f2"><b>27</b></td><td class="num"><b>73</b></td><td class="num">656</td><td class="num">661</td><td class="num">359</td><td>—</td><td>—</td><td style="color:#dc2626"><b>BREAK</b></td><td class="num"><b>26</b></td></tr>
+</table>
+<p>第 1 步就锁定了最优前驱（j = 99，476 分），之后 26 步纯粹是"验证已走过的路径"直到计数器触顶。
+组2 全部 195 次扫描中 168 次这样终止，平均 <b>25.1 步</b> —— skip-break 机制在干净数据上的设计意图得到完美兑现。</p>
+
+<h4>5.4.4 两组的统计对比</h4>
+<table>
+  <tr><th></th><th>组1 示例 read（652 anchor）</th><th>组2 对照 read（195 anchor）</th></tr>
+  <tr><td>由 skip-break 终止的扫描</td><td class="num">500 / 652（77%）</td><td class="num">168 / 195（86%）</td></tr>
+  <tr><td>skip-break 终止的扫描步数</td><td class="num">mean 77 / median 59 / max 381</td><td class="num">mean ~26</td></tr>
+  <tr><td>窗口耗尽终止（未 break）</td><td class="num">152 个，mean 123，max 494</td><td class="num">27 个</td></tr>
+  <tr><td>每步"有效计数"比例</td><td class="num">27/68 ≈ 40%</td><td class="num">26/27 ≈ 96%</td></tr>
+  <tr><td>总扫描步数</td><td class="num">57,500（88 步/anchor）</td><td class="num">4,887（25 步/anchor）</td></tr>
+</table>
+<div class="warn">
+<b>机制层面的结论</b>：组1 慢不是因为它扫到了窗口底（68 ≪ 74），而是因为 skip 计数器被 MIN（24 步）和
+no-effect（12 步）稀释到 40% 的计数效率，需要 2.5 倍的物理步数才能攒够 25 次"撞见已知路径"。
+低复杂度序列的 anchor 在 query 轴上方向混乱（倒挂 → MIN）且前驱稀疏（→ no-effect），两者共同拖慢了每一次终止。
+这也解释了为什么 <code>max_dist_x</code> 调小无效（扫描远未触及窗口底）、而 <code>--max-chain-skip</code> 直接有效（把"25 次撞见"的要求降低）。
+</div>
+
+<h3>5.5 回溯：从分数到链</h3>
+<p>DP 结束后回溯（<code>chain_backtrack</code>）：</p>
+<ol>
+  <li>收集所有 scores ≥ min_chain_score(40) 的 anchor 作为候选，按分数排序；</li>
+  <li>从最高分候选出发，沿 preds 走回链头；途中用 z-drop（max_drop = bw = 500）防止回溯扫过超长 gap；</li>
+  <li>沿途 anchor 标记为已用，继续处理下一候选 —— 因此<b>共享 anchor 的次优链会被截断</b>；</li>
+  <li>链须满足 cnt ≥ min_cnt(3) 且自身分 ≥ 40，否则丢弃。</li>
+</ol>
+<p>本例得到 <b>8 条链</b>（按链头 ref 位置排序，数值为真实 DP 输出）：</p>
+<table>
+  <tr><th>#</th><th>链分数</th><th>anchor 数</th><th>链</th><th>说明</th></tr>
+  <tr style="background:#ecfdf5"><td><b>0</b></td><td class="num"><b>1074</b></td><td class="num"><b>238</b></td><td>+</td><td><b>最优链</b> —— 覆盖 query 34–1645 / ref 70–1607</td></tr>
+  <tr><td>1</td><td class="num">103</td><td class="num">18</td><td>+</td><td>次优链（与最优链共享部分 anchor 被截断后的残余）</td></tr>
+  <tr><td>2</td><td class="num">75</td><td class="num">15</td><td>+</td><td>低复杂度噪声链</td></tr>
+  <tr><td>3</td><td class="num">53</td><td class="num">11</td><td>+</td><td>噪声</td></tr>
+  <tr><td>4</td><td class="num">48</td><td class="num">10</td><td>+</td><td>噪声</td></tr>
+  <tr><td>5</td><td class="num">62</td><td class="num">8</td><td>+</td><td>噪声</td></tr>
+  <tr><td>6</td><td class="num">66</td><td class="num">13</td><td>+</td><td>噪声</td></tr>
+  <tr><td>7</td><td class="num">59</td><td class="num">9</td><td>+</td><td>噪声</td></tr>
+</table>
+<p>后续的 <code>cm:i:238</code>、<code>s1:i:1074</code> 两个 PAF tag 正是链化阶段的直接产物（见 Step 5）。</p>
+
+<h3>5.6 可视化：652 个 anchor 与 8 条链</h3>
+<div class="plot">
+  <div class="ctrl">
+    <b>组1 示例 read</b>（横轴 = target 位置 / 1611 bp，纵轴 = query 位置 / 1649 bp，对角线 = 完全共线参考线）
+    <label><input type="checkbox" id="ckRest" checked> 非 chain anchor（灰）</label>
+    <label><input type="checkbox" id="ckOther" checked> 次优链（橙）</label>
+    <label><input type="checkbox" id="ckBest" checked> 最优链（绿）</label>
+    <label><input type="checkbox" id="ckG2"> 切换为组2 s_aureus 对照 read（195 anchor，仅 1 条链）</label>
+  </div>
+  <svg id="plot" viewBox="0 0 960 560" width="100%"></svg>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--best)"></span>最优链 anchor（组1: 238 个 / 组2: 195 个）</span>
+    <span><span class="dot" style="background:var(--other)"></span>次优链 anchor（其余 7 条链）</span>
+    <span><span class="dot" style="background:var(--rest)"></span>未进入任何链的 anchor（DP 分数 &lt; 40）</span>
+    <span><span class="dot" style="background:#3b82f6"></span>y = x 参考线（anchor 的 query 坐标在构建时已按链方向镜像，正/负链均沿主对角线）</span>
+  </div>
+</div>
+<p id="plotNote" style="font-size:14px;color:var(--muted)">组1：绿链之外仍有大量橙色/灰色散点 —— 这就是低复杂度序列的"anchor 雾"，
+它们既是次优链的来源，也是 DP 扫描负载的来源。切到组2 对照：anchor 一条线排开，没有任何噪声。</p>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s6"><span class="stepno">6</span>Step 4 — RMQ rescue：为什么被跳过</h2>
+
+<div class="card">
+<p>默认情况下（minimap2 的 long-join 机制），DP 链化后如果 <b>存在多条链</b>（<code>u.len() &gt; 1</code>）且最优链未覆盖
+query 的较大部分（&gt;1000 bp 未覆盖或覆盖 &gt;10%），会用 <code>bandwidth_long = 20000</code> 做一次 RMQ（区间最值查询）重链化，
+试图把相距很远的链"缝合"成一条长链（对应 read 中的超大结构变异/转置）。</p>
+<p>本实验使用 <code>--no-long-join</code>（<code>NO_LJOIN</code> flag），该步骤整体短路跳过。</p>
+<div class="note">
+此前实验发现：对 ~1.7 kb 的短 query，rescue 的覆盖条件是<b>恒真式</b>（未覆盖 &gt;1000 bp 与覆盖 &gt;10% 两个分支必居其一），
+导致组1 全部 61 条 read 都白做一次 RMQ 重链化（~0.18 ms/read，总时间 +27%），且比对结果几乎不变 ——
+这正是本教程的命令行加 <code>--no-long-join</code> 的原因。
+</div>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s7"><span class="stepno">7</span>Step 5 — 后链过滤与比对输出</h2>
+
+<div class="card">
+<h3>7.1 从链到比对区间</h3>
+<p>最优链的 anchor 跨度为 <b>query 34–1645 / ref 70–1607</b>（共 238 个 anchor，均分 1074 分）。
+随后管线：</p>
+<ol>
+  <li><b>Build regs + parent/filter</b>：把每条链变成一个比对区间（region），按 score 筛主/次链（MAPQ 由主链分与次优分之差计算）；</li>
+  <li><b>Alignment (Ext)</b>：沿链做种子扩展 DP（affine gap + Z-drop），把 anchor 之间的小 gap 精确对齐，并向两端延伸到链外 ——
+      这就是为什么最终比对（query <b>23</b>–1646 / ref <b>59</b>–1608）比链跨度更长：左端各延伸 ~11 bp（34→23、70→59），右端各延伸 1 bp（1645→1646、1607→1608）；</li>
+  <li>输出 PAF。</li>
+</ol>
+
+<h3>7.2 PAF 逐字段解码（真实输出）</h3>
+<pre>read_11681/11681/subread/0  1649  23  1646  +  ref  1611  59  1608  1091  1642  60  tp:A:P  cm:i:238  s1:i:1074  s2:i:103  dv:f:0.0057  rl:i:0</pre>
+<table>
+  <tr><th>字段</th><th>值</th><th>含义</th><th>来自哪个阶段</th></tr>
+  <tr><td>1–2</td><td>read_…/0, 1649</td><td>query 名与长度</td><td>输入</td></tr>
+  <tr><td>3–4</td><td>23, 1646</td><td>query 比对区间（0-based 半开）</td><td>⑤ 扩展比对（链跨度 34–1645 向左延伸）</td></tr>
+  <tr><td>5</td><td>+</td><td>链方向</td><td>③ 链的 x 高位符号位</td></tr>
+  <tr><td>6–8</td><td>ref, 1611, 59</td><td>target 名/长度/起点</td><td>⑤</td></tr>
+  <tr><td>9</td><td>1608</td><td>target 终点</td><td>⑤</td></tr>
+  <tr><td>10</td><td>1091</td><td>匹配碱基数</td><td>⑤ 扩展比对</td></tr>
+  <tr><td>11</td><td>1642</td><td>比对块长度（含 gap）</td><td>⑤</td></tr>
+  <tr><td>12</td><td>60</td><td>MAPQ：唯一主链，1074 − 103 分差巨大</td><td>⑤ 过滤（次优链仅 103 分）</td></tr>
+  <tr><td>tp:A:P</td><td>P</td><td>primary</td><td>⑤</td></tr>
+  <tr><td><b>cm:i:238</b></td><td>238</td><td>链内 anchor 数</td><td><b>③ 链化回溯</b></td></tr>
+  <tr><td><b>s1:i:1074</b></td><td>1074</td><td>链分数</td><td><b>③ DP 链化</b></td></tr>
+  <tr><td>s2:i:103</td><td>103</td><td>次优链分数</td><td>③</td></tr>
+  <tr><td>dv:f:0.0057</td><td>0.57%</td><td>序列分歧度</td><td>⑤</td></tr>
+</table>
+<p>Read 的其余 60 条以几乎相同的方式得到比对（全部 MAPQ 60，平均覆盖 98%）。</p>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s8"><span class="stepno">8</span>Chaining 负载分析：为什么组1 慢</h2>
+
+<div class="card">
+<p>把两条组的数据放在一起（同为 ~1.7 kb read，~550 个 minimizer，参数完全相同）：</p>
+<table>
+  <tr><th></th><th>组1 low_complexity（本例）</th><th>组2 s_aureus 对照</th></tr>
+  <tr><td>每 read minimizer</td><td class="num">557</td><td class="num">599</td></tr>
+  <tr><td>每 read anchor</td><td class="num">652</td><td class="num">195</td></tr>
+  <tr><td>每 read 最大 hit_count</td><td class="num">14</td><td class="num">1</td></tr>
+  <tr><td><b>每 read DP 扫描步数</b></td><td class="num"><b>57,500（88 步/anchor）</b></td><td class="num"><b>4,887（25 步/anchor）</b></td></tr>
+  <tr><td>每 read 链数</td><td class="num">8</td><td class="num">1</td></tr>
+  <tr><td>链化时间占比</td><td class="num">~70%（16–23 ms / 61 reads）</td><td class="num">~33%（1 ms / 12 reads）</td></tr>
+</table>
+<p><b>三层放大效应</b>：低复杂度 target ① 使每个 minimizer 命中多个位置（anchor 数 ×3.3）；
+② 使 anchor 在 ref 上密集堆积、在 query 上方向混乱（skip-break 失效，扫描步数/anchor ×3.5）；
+③ 两者相乘得到 ~11 倍的链化工作量。61 条 read 合计 258 万次打分计算，全部落在 70% 的链化时间里。</p>
+
+<h3>可以动的杠杆</h3>
+<table>
+  <tr><th>杠杆</th><th>实测效果（组1，链化时间）</th><th>输出影响</th><th>代价</th></tr>
+  <tr><td><code>--max-chain-skip 10</code></td><td>0.021 → ~0.016 s（-25%）</td><td>坐标/MAPQ 零变化；19/62 条比对记录的链分数 tag 微变</td><td>偏离 minimap2 默认（25）</td></tr>
+  <tr><td><code>--max-chain-skip 5</code></td><td>→ ~0.012 s（-43%）</td><td>坐标/MAPQ 零变化；45/62 链分数微变</td><td>偏离更大，真实数据可能截断合法链</td></tr>
+  <tr><td><code>--max-chain-iter 50</code></td><td>→ ~0.011 s（-45%）</td><td><b>2 条 read MAPQ 变化、覆盖降 1.4%</b> — 不推荐</td><td>结果受损</td></tr>
+  <tr><td><code>-g 500</code>（缩 max_dist_x 窗口）</td><td><b>无效果</b>（扫描 skip-limited，窗口非瓶颈）</td><td>—</td><td>—</td></tr>
+  <tr><td><code>-f 0.01</code>（重复 minimizer 过滤）</td><td>anchor −32%，链化时间约减半，可与 skip=10 叠加</td><td>本数据集坐标/MAPQ 零变化</td><td>真实重复区间可能丢种子</td></tr>
+  <tr><td><code>k=15 w=10</code> / <code>-H</code></td><td>从源头降密度（未在本实验测）</td><td>—</td><td>灵敏度下降 / 仅适用均聚物型低复杂度</td></tr>
+  <tr><td>算法改进：按局部 anchor 密度收紧有效扫描</td><td>理论可达组2 水平</td><td>—</td><td>需自行维护，输出可能与 minimap2 不一致</td></tr>
+</table>
+<div class="note">
+<b>为什么 <code>max_dist_x</code> 不是答案</b>：直觉上 5000 ≫ 1611 bp 的窗口"永不收缩"似乎该为负载负责，
+但实测扫描分布（中位 60 / p90 192 步）对窗口大小不敏感 —— 每次扫描的实际终止者是 skip-break
+（25 次 visited 命中），其触发速度取决于 anchor 散布度而非窗口大小。缩小窗口只削掉长尾（max 494 → 417 步）。
+此外 <code>chain.rs:376</code> 把 max_dist_x 钳到 ≥ bandwidth(500)，<code>-g</code> 低于 500 无额外效果。
+真正控制扫描长度的是 <code>max_chain_skip</code>。
+</div>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s9"><span class="stepno">9</span>附录</h2>
+
+<div class="card">
+<h3>A. 本例完整参数表（map-ont + k12 w5）</h3>
+<table>
+  <tr><th>参数</th><th>值</th><th>来源</th></tr>
+  <tr><td>k / w</td><td>12 / 5</td><td>CLI 覆盖</td></tr>
+  <tr><td>mid_occ</td><td>15</td><td>索引自动标定（frac=0.0002，下限 10）</td></tr>
+  <tr><td>min_cnt / min_chain_score</td><td>3 / 40</td><td>map-ont 默认（= minimap2 mm_mapopt_init）</td></tr>
+  <tr><td>max_gap / max_dist_x / max_dist_y</td><td>5000 / 5000 / 5000</td><td>map-ont 默认</td></tr>
+  <tr><td>bandwidth / bandwidth_long</td><td>500 / 20000</td><td>map-ont 默认</td></tr>
+  <tr><td>max_chain_skip / max_chain_iter</td><td>25 / 5000</td><td>map-ont 默认</td></tr>
+  <tr><td><b>chn_pen_gap</b></td><td><b>0.096</b></td><td>finalize_options: 0.8 × 0.01 × k(12)（main.rs:724）</td></tr>
+  <tr><td>chn_pen_skip</td><td>0</td><td>chain_skip_scale(0) × 0.01 × k</td></tr>
+  <tr><td>max_drop（回溯 z-drop）</td><td>500 (= bandwidth)</td><td>非 cDNA 路径</td></tr>
+</table>
+
+<h3>B. 代码索引</h3>
+<table>
+  <tr><th>阶段</th><th>位置</th></tr>
+  <tr><td>minimizer sketch</td><td><code>rammap-core/src/align/sketch.rs::sketch_sequence_impl</code></td></tr>
+  <tr><td>k-mer 哈希</td><td><code>sketch.rs::kmer_hash</code></td></tr>
+  <tr><td>q_occ 过滤</td><td><code>seed.rs::filter_minimizers_by_occ</code></td></tr>
+  <tr><td>种子收集 + select_seeds + rep_len</td><td><code>seed.rs::collect_anchor_matches</code></td></tr>
+  <tr><td>anchor 编码</td><td><code>seed.rs::collect_seed_hits_with_occ</code></td></tr>
+  <tr><td>DP 链化（标量参考实现）</td><td><code>chain.rs::chain_anchors_scalar</code>（SIMD: <code>chain_simd.rs</code>，逐位一致）</td></tr>
+  <tr><td>打分函数</td><td><code>chain.rs::compute_chain_score</code></td></tr>
+  <tr><td>回溯</td><td><code>chain.rs::chain_backtrack / chain_backtrack_end</code></td></tr>
+  <tr><td>管线编排（rescue 判定等）</td><td><code>map.rs::map_query</code>（rescue: map.rs:1038）</td></tr>
+  <tr><td>k 相关惩罚重算</td><td><code>api.rs::finalize_options</code>（CLI 调用点 main.rs:724）</td></tr>
+  <tr><td>不稳定基数排序</td><td><code>sort.rs::radix_sort_128x</code>（MSD American Flag）</td></tr>
+</table>
+
+<h3>C. 复现与校验</h3>
+<div class="good">
+本教程的所有 per-read 数字来自对 rammap 管线的独立 Python 复现（sketch、q_occ 过滤、select_seeds、anchor 编码、
+不稳定 MSD radix sort、标量 DP 链化、回溯均逐行移植，f32 语义精确模拟）。与 rammap 官方输出的对照：
+<ul>
+  <li>61 条 read minimizer 总数：<b>33,584 = 33,584</b> ✓（逐位一致）</li>
+  <li>anchor 总数：<b>31,442 = 31,442</b> ✓（逐位一致）</li>
+  <li>入链 anchor 总数：<b>15,755 = 15,755</b> ✓（逐位一致）</li>
+  <li>示例 read 的 DP 逐 anchor 复核：scores 与 preds 数组与 Rust 真值（经 rstest 调用 <code>chain_anchors</code> 生成）<b>0/652 差异</b> ✓</li>
+  <li>示例 read：rammap 单 read 统计 Seeds 557 / Anchors 652 / Chains 322 与复现完全一致；最优链
+      (score 1074, 238 anchors) 与 PAF tag <code>s1:i:1074</code>、<code>cm:i:238</code> 完全对应 ✓</li>
+</ul>
+</div>
+<p>复现脚本与数据：<code>/tmp/trace_pipeline.py</code>、<code>/tmp/pipeline_trace.json</code>；
+不依赖任何外部库，纯静态页面。</p>
+</div>
+
+<footer>
+rammap (minimap2-compatible aligner) pipeline tutorial · 生成于 2026-11-13 ·
+数据: test_data/low_complexity_{target,queries}.fa · 命令: <code>rammap -x map-ont -k 12 -w 5 -t 1 --no-long-join ref.idx queries.fa</code>
+</footer>
+
+<script>
+// ---- data ----
+const DATA = {"g1":{"tname":"ref","tlen":1611,"qlen":1649,"n_mins":557,"n_anchors":652,"scan":55481,"chains":[{"score":1074,"cnt":238,"anchors":[[70,34],[110,76],[115,81],[160,133],[165,138],[177,149],[182,154],[187,159],[192,164],[232,204],[237,209],[242,214],[252,223],[253,224],[268,238],[272,242],[273,243],[293,265],[309,282],[310,283],[333,310],[348,326],[352,330],[353,331],[356,334],[360,338],[363,341],[366,344],[371,349],[372,350],[384,361],[414,390],[417,393],[422,398],[423,399],[427,403],[428,404],[431,407],[435,411],[440,416],[445,421],[450,426],[462,439],[465,442],[468,445],[469,446],[473,450],[475,452],[490,468],[493,471],[508,486],[510,488],[512,490],[517,495],[518,496],[523,501],[543,522],[546,525],[549,528],[575,553],[580,558],[582,560],[586,564],[588,566],[589,567],[592,570],[605,582],[607,584],[608,585],[613,590],[616,593],[641,634],[642,635],[644,637],[645,638],[646,639],[649,642],[652,645],[656,649],[658,651],[660,653],[665,658],[666,659],[667,660],[670,663],[672,665],[676,669],[678,671],[679,672],[684,677],[685,678],[687,680],[692,685],[705,699],[706,700],[742,743],[744,745],[793,803],[796,806],[807,818],[808,819],[837,855],[855,874],[857,876],[870,888],[871,889],[873,891],[878,896],[916,934],[919,937],[920,938],[923,941],[939,958],[941,960],[942,961],[945,964],[948,967],[949,968],[951,970],[955,974],[982,1000],[986,1004],[989,1007],[990,1008],[993,1011],[998,1016],[1002,1020],[1005,1023],[1033,1051],[1035,1053],[1038,1056],[1039,1057],[1040,1058],[1041,1059],[1061,1079],[1062,1080],[1067,1085],[1068,1086],[1069,1087],[1086,1103],[1091,1108],[1132,1164],[1133,1165],[1135,1167],[1136,1168],[1141,1173],[1143,1175],[1144,1176],[1149,1181],[1185,1216],[1187,1218],[1192,1223],[1208,1238],[1213,1243],[1215,1245],[1232,1261],[1235,1264],[1240,1269],[1256,1286],[1259,1289],[1262,1292],[1263,1293],[1268,1298],[1279,1310],[1293,1329],[1294,1330],[1295,1331],[1296,1332],[1301,1337],[1303,1339],[1306,1342],[1307,1343],[1310,1346],[1326,1360],[1329,1363],[1332,1366],[1333,1367],[1336,1370],[1337,1371],[1342,1376],[1343,1377],[1347,1381],[1361,1397],[1363,1399],[1366,1402],[1369,1405],[1372,1408],[1377,1413],[1380,1416],[1385,1421],[1388,1424],[1390,1426],[1392,1428],[1394,1430],[1397,1433],[1402,1438],[1403,1439],[1404,1440],[1405,1441],[1407,1443],[1408,1444],[1410,1446],[1415,1451],[1416,1452],[1418,1454],[1422,1458],[1424,1460],[1428,1464],[1431,1467],[1433,1469],[1456,1496],[1457,1497],[1462,1502],[1467,1507],[1484,1523],[1487,1526],[1490,1529],[1492,1531],[1497,1536],[1498,1537],[1501,1540],[1523,1560],[1527,1564],[1531,1568],[1534,1571],[1536,1573],[1537,1574],[1555,1591],[1558,1594],[1561,1597],[1562,1598],[1565,1601],[1588,1626],[1589,1627],[1594,1632],[1597,1635],[1602,1640],[1607,1645]],"strand":"+"},{"score":103,"cnt":18,"anchors":[[88,81],[93,138],[110,154],[115,159],[120,164],[132,243],[135,246],[152,309],[153,310],[156,313],[173,334],[177,338],[209,416],[214,421],[219,426],[247,463],[273,501],[293,522]],"strand":"+"},{"score":75,"cnt":15,"anchors":[[110,416],[115,421],[120,426],[132,439],[135,442],[138,445],[148,463],[152,467],[153,501],[170,522],[187,553],[192,558],[214,685],[272,818],[273,819]],"strand":"+"},{"score":53,"cnt":11,"anchors":[[132,338],[135,341],[153,361],[156,390],[173,407],[177,411],[182,416],[187,421],[192,426],[214,553],[219,558]],"strand":"+"},{"score":48,"cnt":10,"anchors":[[170,64],[173,67],[177,71],[182,76],[187,81],[219,138],[273,149],[278,154],[283,159],[288,164]],"strand":"+"},{"score":62,"cnt":8,"anchors":[[316,50],[333,71],[338,76],[435,149],[440,154],[445,159],[450,164],[523,243]],"strand":"+"},{"score":66,"cnt":13,"anchors":[[360,310],[363,313],[399,326],[403,330],[404,331],[407,334],[411,338],[414,341],[417,344],[422,349],[423,350],[435,361],[465,390]],"strand":"+"},{"score":59,"cnt":9,"anchors":[[431,67],[435,71],[440,76],[445,81],[475,122],[523,149],[528,154],[533,159],[538,164]],"strand":"+"}],"allAnchors":[[63,486],[65,488],[70,34],[83,528],[88,81],[88,685],[88,159],[88,421],[88,553],[93,164],[93,426],[93,558],[93,138],[110,76],[110,416],[110,154],[115,421],[115,81],[115,553],[115,685],[115,159],[120,558],[120,164],[120,426],[120,138],[125,64],[125,522],[125,265],[128,407],[128,334],[128,67],[132,501],[132,338],[132,310],[132,439],[132,468],[132,243],[132,71],[132,819],[132,411],[132,149],[132,361],[135,313],[135,442],[135,390],[135,246],[135,341],[138,445],[140,488],[143,214],[148,238],[148,463],[152,467],[152,242],[152,309],[152,818],[152,438],[153,338],[153,310],[153,439],[153,361],[153,243],[153,411],[153,468],[153,501],[153,71],[153,819],[153,149],[156,390],[156,442],[156,341],[156,313],[156,246],[160,133],[165,426],[165,138],[165,558],[165,164],[170,265],[170,522],[170,64],[173,407],[173,334],[173,67],[177,71],[177,149],[177,338],[177,439],[177,310],[177,468],[177,819],[177,411],[177,361],[177,243],[177,501],[182,154],[182,76],[182,416],[187,421],[187,81],[187,553],[187,685],[187,159],[192,138],[192,164],[192,426],[192,558],[209,76],[209,154],[209,416],[214,421],[214,685],[214,81],[214,553],[214,159],[219,558],[219,164],[219,138],[219,426],[224,64],[224,265],[224,522],[227,407],[227,334],[227,67],[232,204],[232,224],[237,209],[242,214],[247,238],[247,463],[252,223],[252,203],[253,204],[253,224],[258,209],[263,214],[268,463],[268,238],[272,242],[272,309],[272,467],[272,818],[272,438],[273,468],[273,71],[273,501],[273,819],[273,361],[273,310],[273,439],[273,149],[273,411],[273,338],[273,243],[278,76],[278,416],[278,154],[283,81],[283,159],[283,421],[283,553],[283,685],[288,426],[288,138],[288,558],[288,164],[293,64],[293,522],[293,265],[296,334],[296,67],[296,407],[300,501],[300,468],[300,71],[300,243],[300,338],[300,361],[300,439],[300,149],[300,411],[300,819],[300,310],[303,341],[303,390],[303,246],[303,442],[303,313],[309,282],[310,283],[314,416],[314,76],[314,154],[316,50],[333,243],[333,439],[333,149],[333,71],[333,501],[333,468],[333,310],[333,361],[333,338],[333,819],[333,411],[338,416],[338,76],[338,154],[340,530],[340,550],[348,399],[348,350],[348,326],[352,330],[352,403],[353,331],[353,404],[356,334],[356,67],[356,407],[360,243],[360,149],[360,439],[360,411],[360,71],[360,310],[360,468],[360,501],[360,361],[360,338],[360,819],[363,246],[363,390],[363,341],[363,442],[363,313],[366,393],[366,344],[371,398],[371,349],[372,326],[372,399],[372,350],[376,330],[376,403],[377,404],[377,331],[380,407],[380,334],[380,67],[384,361],[384,501],[384,149],[384,411],[384,439],[384,71],[384,468],[384,819],[384,243],[384,310],[384,338],[389,416],[389,76],[389,154],[391,530],[391,550],[399,399],[399,326],[399,350],[403,403],[403,330],[404,404],[404,331],[407,407],[407,334],[407,67],[411,243],[411,310],[411,501],[411,149],[411,411],[411,439],[411,71],[411,468],[411,819],[411,361],[411,338],[414,341],[414,390],[414,246],[414,442],[414,313],[417,344],[417,393],[422,349],[422,398],[423,326],[423,350],[423,399],[427,403],[427,330],[428,331],[428,404],[431,407],[431,67],[431,334],[435,501],[435,338],[435,411],[435,310],[435,439],[435,149],[435,468],[435,819],[435,71],[435,361],[435,243],[440,76],[440,416],[440,154],[445,685],[445,81],[445,159],[445,421],[445,553],[450,426],[450,558],[450,138],[450,164],[455,522],[455,265],[455,64],[458,407],[458,67],[458,334],[462,71],[462,149],[462,243],[462,501],[462,310],[462,361],[462,439],[462,468],[462,411],[462,338],[462,819],[465,341],[465,390],[465,246],[465,313],[465,442],[468,445],[469,446],[473,434],[473,450],[475,122],[475,452],[481,486],[483,488],[486,407],[486,67],[486,334],[490,338],[490,71],[490,310],[490,149],[490,243],[490,439],[490,411],[490,361],[490,501],[490,819],[490,468],[493,471],[508,486],[510,488],[512,490],[512,381],[517,495],[518,496],[523,243],[523,149],[523,468],[523,501],[523,411],[523,819],[523,361],[523,310],[523,439],[523,71],[523,338],[528,416],[528,76],[528,154],[533,81],[533,421],[533,553],[533,685],[533,159],[538,426],[538,164],[538,138],[538,558],[543,265],[543,522],[543,64],[546,525],[549,528],[554,421],[554,685],[554,81],[554,553],[554,159],[559,558],[559,426],[559,138],[559,164],[564,64],[564,265],[564,522],[567,525],[570,528],[575,421],[575,685],[575,81],[575,553],[575,159],[580,558],[580,138],[580,426],[580,164],[582,560],[586,564],[588,566],[589,567],[592,570],[596,685],[596,81],[596,421],[596,553],[596,159],[605,582],[607,584],[608,585],[613,590],[616,593],[630,638],[631,639],[634,642],[637,645],[641,634],[642,635],[644,637],[645,638],[646,639],[649,642],[652,645],[656,649],[658,651],[660,653],[665,658],[666,659],[667,660],[670,663],[672,665],[676,669],[678,671],[679,672],[684,677],[685,678],[687,680],[692,685],[692,553],[692,81],[692,421],[692,159],[697,138],[697,164],[697,426],[697,558],[705,699],[706,700],[742,743],[744,745],[793,803],[796,806],[807,309],[807,818],[807,438],[807,242],[807,467],[808,243],[808,310],[808,71],[808,338],[808,361],[808,501],[808,411],[808,149],[808,439],[808,468],[808,819],[811,246],[811,313],[811,341],[811,390],[811,442],[826,1079],[837,855],[855,874],[857,876],[870,888],[871,889],[873,891],[878,896],[916,934],[919,937],[920,938],[923,941],[939,958],[941,960],[942,961],[945,964],[948,967],[949,968],[951,970],[955,974],[982,1000],[986,1004],[989,1007],[990,1008],[993,1011],[998,1016],[1002,1020],[1005,1023],[1033,1051],[1035,1053],[1038,1056],[1039,1057],[1040,1058],[1041,1059],[1061,1079],[1062,1080],[1067,1085],[1068,1086],[1069,1087],[1086,1103],[1091,1108],[1132,1164],[1133,1165],[1135,1167],[1136,1168],[1141,1173],[1143,1175],[1144,1176],[1149,1181],[1185,1216],[1187,1218],[1192,1223],[1208,1238],[1213,1243],[1215,1245],[1232,1261],[1235,1264],[1240,1269],[1256,1286],[1259,1289],[1262,1292],[1263,1293],[1268,1298],[1279,1310],[1293,1329],[1294,1330],[1295,1331],[1296,1332],[1301,1337],[1303,1339],[1306,1342],[1307,1343],[1310,1346],[1326,1360],[1329,1363],[1332,1366],[1333,1367],[1336,1370],[1337,1371],[1342,1376],[1343,1377],[1347,1381],[1361,1397],[1363,1399],[1366,1402],[1369,1405],[1372,1408],[1377,1413],[1380,1416],[1385,1421],[1388,1424],[1390,1426],[1392,1428],[1394,1430],[1397,1433],[1402,1438],[1403,1439],[1404,1440],[1405,1441],[1407,1443],[1408,1444],[1410,1446],[1415,1451],[1416,1452],[1418,1454],[1422,1458],[1424,1460],[1428,1464],[1431,1467],[1433,1469],[1456,1496],[1457,1497],[1462,1502],[1467,1507],[1484,1523],[1487,1526],[1490,1529],[1492,1531],[1497,1536],[1498,1537],[1501,1540],[1523,1560],[1527,1564],[1531,1568],[1534,1571],[1536,1573],[1537,1574],[1555,1591],[1558,1594],[1561,1597],[1562,1598],[1565,1601],[1588,1626],[1589,1627],[1594,1632],[1597,1635],[1602,1640],[1607,1645],[14,14],[19,19],[24,24],[27,27],[32,32],[33,33]],"name":"read_11681/11681/subread/0"},"g2":{"tname":"ref","tlen":1709,"qlen":1729,"n_mins":599,"n_anchors":195,"scan":4887,"chains":[{"score":996,"cnt":195,"anchors":[[33,33],[34,34],[36,36],[39,39],[42,42],[81,79],[85,83],[153,151],[154,152],[156,154],[160,158],[175,172],[177,174],[204,201],[206,203],[207,204],[210,207],[215,212],[216,213],[230,228],[235,233],[236,234],[240,238],[241,239],[242,240],[247,245],[248,246],[276,276],[279,279],[284,284],[305,304],[321,322],[333,335],[337,339],[342,344],[344,346],[345,347],[346,348],[348,350],[372,374],[374,376],[377,379],[380,382],[436,437],[452,454],[456,458],[458,460],[463,465],[532,538],[537,543],[538,544],[539,545],[540,546],[541,547],[546,552],[547,553],[548,554],[575,581],[577,583],[586,594],[589,597],[594,602],[612,619],[614,621],[618,625],[620,627],[625,632],[627,634],[632,639],[634,641],[651,656],[654,659],[655,660],[656,661],[658,663],[663,668],[665,670],[666,671],[668,673],[672,677],[690,695],[693,698],[711,718],[713,720],[717,724],[730,737],[732,739],[737,744],[741,748],[744,751],[749,756],[750,757],[755,762],[756,763],[758,765],[762,769],[764,771],[765,772],[815,819],[820,824],[825,829],[827,831],[828,832],[853,858],[867,873],[884,891],[898,906],[901,909],[906,914],[950,973],[967,988],[981,1001],[982,1002],[983,1003],[993,1014],[1010,1033],[1027,1048],[1029,1050],[1059,1078],[1063,1082],[1064,1083],[1065,1084],[1070,1089],[1073,1092],[1074,1093],[1076,1095],[1080,1099],[1100,1118],[1104,1122],[1106,1124],[1110,1128],[1135,1154],[1137,1156],[1168,1185],[1169,1186],[1201,1215],[1210,1225],[1225,1241],[1230,1246],[1232,1248],[1275,1292],[1279,1296],[1292,1310],[1307,1326],[1309,1328],[1310,1329],[1334,1350],[1338,1354],[1341,1357],[1342,1358],[1344,1360],[1345,1361],[1350,1366],[1351,1367],[1355,1371],[1357,1373],[1360,1376],[1361,1377],[1389,1405],[1390,1406],[1393,1409],[1418,1436],[1422,1440],[1435,1452],[1448,1466],[1450,1468],[1479,1494],[1482,1497],[1483,1498],[1485,1500],[1487,1502],[1492,1507],[1493,1508],[1520,1536],[1522,1538],[1525,1541],[1563,1584],[1592,1612],[1593,1613],[1595,1615],[1599,1619],[1603,1623],[1605,1625],[1610,1630],[1611,1631],[1612,1632],[1614,1634],[1615,1635],[1620,1640],[1668,1687],[1670,1689],[1674,1693],[1688,1709],[1690,1711],[1695,1716]],"strand":"-"}],"allAnchors":[[33,33],[34,34],[36,36],[39,39],[42,42],[81,79],[85,83],[153,151],[154,152],[156,154],[160,158],[175,172],[177,174],[204,201],[206,203],[207,204],[210,207],[215,212],[216,213],[230,228],[235,233],[236,234],[240,238],[241,239],[242,240],[247,245],[248,246],[276,276],[279,279],[284,284],[305,304],[321,322],[333,335],[337,339],[342,344],[344,346],[345,347],[346,348],[348,350],[372,374],[374,376],[377,379],[380,382],[436,437],[452,454],[456,458],[458,460],[463,465],[532,538],[537,543],[538,544],[539,545],[540,546],[541,547],[546,552],[547,553],[548,554],[575,581],[577,583],[586,594],[589,597],[594,602],[612,619],[614,621],[618,625],[620,627],[625,632],[627,634],[632,639],[634,641],[651,656],[654,659],[655,660],[656,661],[658,663],[663,668],[665,670],[666,671],[668,673],[672,677],[690,695],[693,698],[711,718],[713,720],[717,724],[730,737],[732,739],[737,744],[741,748],[744,751],[749,756],[750,757],[755,762],[756,763],[758,765],[762,769],[764,771],[765,772],[815,819],[820,824],[825,829],[827,831],[828,832],[853,858],[867,873],[884,891],[898,906],[901,909],[906,914],[950,973],[967,988],[981,1001],[982,1002],[983,1003],[993,1014],[1010,1033],[1027,1048],[1029,1050],[1059,1078],[1063,1082],[1064,1083],[1065,1084],[1070,1089],[1073,1092],[1074,1093],[1076,1095],[1080,1099],[1100,1118],[1104,1122],[1106,1124],[1110,1128],[1135,1154],[1137,1156],[1168,1185],[1169,1186],[1201,1215],[1210,1225],[1225,1241],[1230,1246],[1232,1248],[1275,1292],[1279,1296],[1292,1310],[1307,1326],[1309,1328],[1310,1329],[1334,1350],[1338,1354],[1341,1357],[1342,1358],[1344,1360],[1345,1361],[1350,1366],[1351,1367],[1355,1371],[1357,1373],[1360,1376],[1361,1377],[1389,1405],[1390,1406],[1393,1409],[1418,1436],[1422,1440],[1435,1452],[1448,1466],[1450,1468],[1479,1494],[1482,1497],[1483,1498],[1485,1500],[1487,1502],[1492,1507],[1493,1508],[1520,1536],[1522,1538],[1525,1541],[1563,1584],[1592,1612],[1593,1613],[1595,1615],[1599,1619],[1603,1623],[1605,1625],[1610,1630],[1611,1631],[1612,1632],[1614,1634],[1615,1635],[1620,1640],[1668,1687],[1670,1689],[1674,1693],[1688,1709],[1690,1711],[1695,1716]],"name":"read_210614/210614/subread/0"}};
+const g1 = DATA.g1, g2 = DATA.g2;
+
+const svg = document.getElementById('plot');
+const W = 960, H = 560, M = { l: 60, r: 20, t: 30, b: 44 };
+const bestCk = document.getElementById('ckBest');
+const otherCk = document.getElementById('ckOther');
+const restCk = document.getElementById('ckRest');
+const g2Ck = document.getElementById('ckG2');
+const note = document.getElementById('plotNote');
+const note1 = note.textContent;
+
+function svgEl(tag, attrs, parent) {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function render() {
+  const G = g2Ck.checked ? g2 : g1;
+  svg.innerHTML = '';
+  const xmax = G.tlen, ymax = G.qlen;
+  const X = v => M.l + v / xmax * (W - M.l - M.r);
+  const Y = v => H - M.b - v / ymax * (H - M.t - M.b);
+
+  // axes
+  svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#fcfcfa' }, svg);
+  for (let t = 0; t <= xmax; t += Math.ceil(xmax / 8 / 100) * 100) {
+    svgEl('line', { x1: X(t), y1: H - M.b, x2: X(t), y2: M.t, stroke: '#eee' }, svg);
+    const tx = svgEl('text', { x: X(t), y: H - M.b + 16, 'text-anchor': 'middle', 'font-size': 11, fill: '#6b7280' }, svg);
+    tx.textContent = t;
+  }
+  for (let t = 0; t <= ymax; t += Math.ceil(ymax / 8 / 100) * 100) {
+    svgEl('line', { x1: M.l, y1: Y(t), x2: W - M.r, y2: Y(t), stroke: '#eee' }, svg);
+    const tx = svgEl('text', { x: M.l - 6, y: Y(t) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#6b7280' }, svg);
+    tx.textContent = t;
+  }
+  const xl = svgEl('text', { x: W / 2, y: H - 6, 'text-anchor': 'middle', 'font-size': 12, fill: '#374151' }, svg);
+  xl.textContent = 'target 位置 (bp) — ' + G.tname + ' ' + G.tlen + ' bp' + (g2Ck.checked ? '（对照）' : '');
+  const yl = svgEl('text', { x: 16, y: H / 2, 'text-anchor': 'middle', 'font-size': 12, fill: '#374151', transform: `rotate(-90 16 ${H / 2})` }, svg);
+  yl.textContent = 'query 位置 (bp) — ' + G.name;
+
+  // identity diagonal — anchor y is strand-mirrored at build time, so chains
+  // always run up-right regardless of strand
+  svgEl('line', { x1: X(0), y1: Y(0), x2: X(xmax), y2: Y(ymax), stroke: '#3b82f6', 'stroke-dasharray': '5 4', 'stroke-width': 1 }, svg);
+
+  // classify anchors
+  const best = G.chains[0];
+  const bestSet = new Set(best.anchors.map(p => p[0] + ':' + p[1]));
+  const others = [];
+  for (let ci = 1; ci < G.chains.length; ci++)
+    for (const p of G.chains[ci].anchors) others.push(p);
+  const inChain = new Set();
+  for (const c of G.chains) for (const p of c.anchors) inChain.add(p[0] + ':' + p[1]);
+  const rest = [];
+  for (const p of G.allAnchors || []) if (!inChain.has(p[0] + ':' + p[1])) rest.push(p);
+
+  function pts(arr, color, r, op, show) {
+    if (!show) return;
+    for (const p of arr)
+      svgEl('circle', { cx: X(p[0]), cy: Y(p[1]), r: r, fill: color, 'fill-opacity': op }, svg);
+  }
+  pts(rest, getComputedStyle(document.documentElement).getPropertyValue('--rest').trim() || '#9ca3af', 2.2, 0.75, restCk.checked);
+  pts(others, '#d97706', 3.0, 0.9, otherCk.checked);
+  pts(best.anchors, '#0e7c66', 3.4, 1.0, bestCk.checked);
+}
+
+bestCk.onchange = render; otherCk.onchange = render; restCk.onchange = render; g2Ck.onchange = () => { render(); note.textContent = g2Ck.checked ? '组2 对照：195 个 anchor 全部进入唯一一条链（反向比对，链化坐标沿对角线 —— anchor 的 query 坐标在构建时已按链方向镜像），DP 每个 anchor 平均只扫 25 步 —— skip-break 机制完美工作。切回组1：注意灰色散点在 query 轴上的"上下乱跳"（正链 anchor 的 query 坐标也不单调），它们使 visited 标记失效、扫描退化为近线性窗口全扫。' : note1; };
+render();
+
+// ---- skip-count curve (5.4.2): real 68-step trace of anchor #74 ----
+(function drawSkipChart() {
+  const G1ACT = "IIINMINMNMMNVIMVVMMVVMMVVMMVVNMVVNNMNVMMVVMVVVNMVVMVMVMMVNVVVVMMNMNB";
+  const G1SKIP = [0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,2,2,2,3,4,4,4,5,6,6,6,7,8,8,8,9,10,10,10,10,10,11,11,11,12,13,13,14,15,16,16,16,17,18,18,19,19,20,20,20,21,21,22,23,24,25,25,25,25,25,25,26];
+  const G2ACT = "I" + "V".repeat(25) + "B";
+  const G2SKIP = Array.from({length: 27}, (_, i) => i);
+  const svg = document.getElementById('skipChart');
+  if (!svg) return;
+  const W = 900, H = 260, M = { l: 46, r: 16, t: 24, b: 40 };
+  const maxStep = G1SKIP.length, maxSkip = 26;
+  const X = s => M.l + (s - 1) / (maxStep - 1) * (W - M.l - M.r);
+  const Y = v => H - M.b - v / maxSkip * (H - M.t - M.b);
+  const el = (tag, attrs, txt) => {
+    const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (txt !== undefined) e.textContent = txt;
+    svg.appendChild(e); return e;
+  };
+  el('rect', { x: 0, y: 0, width: W, height: H, fill: '#fcfcfa' });
+  for (let v = 0; v <= 26; v += 5) {
+    el('line', { x1: M.l, y1: Y(v), x2: W - M.r, y2: Y(v), stroke: '#eee' });
+    el('text', { x: M.l - 6, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#6b7280' }, v);
+  }
+  for (let s = 10; s <= 68; s += 10) {
+    el('line', { x1: X(s), y1: M.t, x2: X(s), y2: H - M.b, stroke: '#f0f0f0' });
+    el('text', { x: X(s), y: H - M.b + 16, 'text-anchor': 'middle', 'font-size': 11, fill: '#6b7280' }, s);
+  }
+  el('text', { x: W / 2, y: H - 4, 'text-anchor': 'middle', 'font-size': 12, fill: '#374151' }, '扫描步（从 j = 73 逆行到 j = 6）');
+  el('text', { x: 14, y: H / 2, 'text-anchor': 'middle', 'font-size': 12, fill: '#374151', transform: `rotate(-90 14 ${H/2})` }, 'skip 计数器');
+  // MIN / no-effect "frozen" ticks at bottom
+  for (let s = 0; s < G1ACT.length; s++) {
+    const a = G1ACT[s];
+    if (a === 'M' || a === 'N') el('rect', { x: X(s + 1) - 1.2, y: Y(0) - 7, width: 2.4, height: 7, fill: '#cbd5e1' });
+  }
+  // g2 reference line (dashed) — scaled to same 0..26 range over its 27 steps
+  el('polyline', {
+    points: G2SKIP.map((v, i) => `${X((i + 1) * 68 / 27)},${Y(v)}`).join(' '),
+    fill: 'none', stroke: '#3b82f6', 'stroke-width': 1.4, 'stroke-dasharray': '5 4', opacity: 0.55
+  });
+  // g1 polyline
+  el('polyline', {
+    points: G1SKIP.map((v, i) => `${X(i + 1)},${Y(v)}`).join(' '),
+    fill: 'none', stroke: '#d97706', 'stroke-width': 2
+  });
+  const col = { I: '#0e7c66', V: '#d97706', M: '#cbd5e1', N: '#cbd5e1', B: '#dc2626' };
+  for (let s = 0; s < G1ACT.length; s++) {
+    const a = G1ACT[s];
+    if (a === 'M' || a === 'N') continue;
+    el('circle', { cx: X(s + 1), cy: Y(G1SKIP[s]), r: a === 'B' ? 5 : 3.4, fill: col[a] });
+  }
+  el('circle', { cx: X(68), cy: Y(26), r: 8, fill: 'none', stroke: '#dc2626', 'stroke-width': 1.5 });
+  el('text', { x: X(68) - 10, y: Y(26) - 10, 'text-anchor': 'end', 'font-size': 11, fill: '#dc2626' }, 'BREAK (26 > 25)');
+  el('text', { x: X(1), y: Y(3), 'text-anchor': 'start', 'font-size': 11, fill: '#0e7c66' }, 'IMPROVE ×5（第 1–14 步，best 13→52）');
+  el('text', { x: X(30), y: Y(11), 'text-anchor': 'middle', 'font-size': 11, fill: '#3b82f6' }, '组2 参考线：27 步即触顶（虚线）');
+})();
+</script>
+</div>
+</body>
+</html>
