@@ -1,4 +1,4 @@
-//! Example: low-level pairwise DP alignment using rammap's SIMD engine.
+//! Example: low-level pairwise DP alignment using bandmap's SIMD engine.
 //!
 //! Demonstrates global, semi-global, and extension alignment modes with
 //! the same SIMD-optimized DP kernels used internally for read mapping.
@@ -6,7 +6,7 @@
 //! Usage:
 //!   cargo run --release --example dp_align
 
-use rammap::{dp_align, dp_global, dp_local, dp_extension, DpScoring, encode_nt4};
+use bandmap::{dp_align, dp_global, dp_local, dp_extension, DpScoring, encode_nt4};
 
 fn main() {
     // Two similar sequences with a mismatch and a small insertion

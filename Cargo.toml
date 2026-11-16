@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["rammap-core", "rammap"]
+members = ["bandmap-core", "bandmap"]
 
 [workspace.package]
-version = "1.2.0"
+version = "2.0.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/jwanglab/rammap"
+repository = "https://github.com/keithyin/rammap"
 # Shared across both crates; the path is resolved relative to the workspace root.
 readme = "README.md"
 

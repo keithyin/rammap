@@ -7,8 +7,8 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use rammap::api::{Aligner, Preset};
-//! use rammap::Strand;
+//! use bandmap::api::{Aligner, Preset};
+//! use bandmap::Strand;
 //!
 //! let aligner = Aligner::from_index("reference.mmi", Preset::MapOnt).unwrap();
 //! let results = aligner.map_seq("read1", b"ACGTACGTACGT...");
@@ -173,7 +173,7 @@ pub struct Mapping {
     /// Whether this mapping would receive SAM FLAG 0x800 (supplementary) if written out.
     /// `false` for secondary mappings (`!is_primary`) and for the first non-secondary mapping
     /// of a read (which is SAM-primary, FLAG 0); `true` for every subsequent non-secondary
-    /// mapping. This is the real primary/supplementary determination minimap2 and rammap's own
+    /// mapping. This is the real primary/supplementary determination minimap2 and bandmap's own
     /// SAM writer use (`align/pipeline.rs`'s `sam_pri`). Always `false` on the paired-end path,
     /// which only sees formatted text with no per-mate boundaries.
     pub is_supplementary: bool,
@@ -232,7 +232,7 @@ pub struct MapResult {
 /// For minimap2-rs compatibility, preset methods are also available:
 ///
 /// ```no_run
-/// use rammap::api::Aligner;
+/// use bandmap::api::Aligner;
 /// let aligner = Aligner::from_fasta("ref.fa", Aligner::map_ont()).unwrap();
 /// ```
 pub struct Aligner {
@@ -279,7 +279,7 @@ fn invalid(msg: String) -> io::Error {
 /// [`Aligner::options_mut`].
 ///
 /// ```no_run
-/// use rammap::api::{Aligner, Preset};
+/// use bandmap::api::{Aligner, Preset};
 /// // Dense seeding for short, degraded cDNA reads: w = 1 indexes every k-mer,
 /// // at proportionally higher index memory cost.
 /// let aligner = Aligner::builder(Preset::MapOnt).k(12).w(1).from_fasta("cdna.fa")?;
@@ -356,7 +356,7 @@ impl AlignerBuilder {
         Ok(self.finish(opt, Index::build(seqs, w, k, hpc, self.index_max_occ)))
     }
 
-    /// Load a pre-built index file (rammap `RMMI`, minimap2 `.mmi`, or legacy
+    /// Load a pre-built index file (bandmap `RMMI`, minimap2 `.mmi`, or legacy
     /// format; detected from the file's magic).
     pub fn from_index(self, path: &str) -> io::Result<Aligner> {
         let index = Index::load(path)?;
@@ -481,7 +481,7 @@ impl Aligner {
     /// Start a builder for overriding the preset's seeding parameters.
     ///
     /// ```no_run
-    /// use rammap::api::{Aligner, Preset};
+    /// use bandmap::api::{Aligner, Preset};
     /// let aligner = Aligner::builder(Preset::MapOnt).k(12).w(1).from_fasta("ref.fa")?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
@@ -489,14 +489,14 @@ impl Aligner {
         AlignerBuilder::new(preset)
     }
 
-    /// Load an aligner from a pre-built index file (rammap `RMMI`, minimap2
+    /// Load an aligner from a pre-built index file (bandmap `RMMI`, minimap2
     /// `.mmi`, or legacy format; the format is detected from the file's magic).
     pub fn from_index(path: &str, preset: Preset) -> io::Result<Self> {
         Aligner::builder(preset).from_index(path)
     }
 
     /// Load an aligner from any seekable reader positioned at the start of a
-    /// rammap (`RMMI`), minimap2 (`.mmi`), or legacy index. Unlike
+    /// bandmap (`RMMI`), minimap2 (`.mmi`), or legacy index. Unlike
     /// [`Aligner::from_index`], the caller owns the reader and may bound it to
     /// exactly the index bytes — e.g. a [`std::io::Cursor`] over a slice whose
     /// trailing footer/metadata has been removed, or an index embedded in a
@@ -517,7 +517,7 @@ impl Aligner {
     /// Build an aligner from in-memory sequences (name, sequence pairs).
     ///
     /// ```no_run
-    /// use rammap::api::{Aligner, Preset};
+    /// use bandmap::api::{Aligner, Preset};
     /// let seqs = vec![
     ///     ("chr1".to_string(), b"ACGTACGT...".to_vec()),
     ///     ("chr2".to_string(), b"TGCATGCA...".to_vec()),
@@ -589,7 +589,7 @@ impl Aligner {
 
     /// Load known splice junctions from a BED file (BED6/BED12), enabling
     /// junction-aware splice scoring on subsequent `map_seq` calls. This is the
-    /// rammap equivalent of minimap2's `--junc-bed` (and minimap2-rs's
+    /// bandmap equivalent of minimap2's `--junc-bed` (and minimap2-rs's
     /// `read_junction_lr`). Reference names in the BED are resolved against the
     /// built index, so this must be called after construction.
     pub fn load_junctions_bed(&mut self, path: &str) -> io::Result<()> {
@@ -917,7 +917,7 @@ pub fn apply_preset_str(opt: &mut MapOptions, k: &mut usize, w: &mut usize, is_h
             // Cap SIMD at AVX2: SR mapping spends ~7-10% of CPU in DP and the rest
             // in chaining/seeding/output, so AVX-512's all-core license throttle
             // (200-600 MHz drop on Skylake-X / Cascade / Cooper Lake) costs more
-            // than the DP speedup wins. RAMMAP_FORCE_AVX512=1 overrides this.
+            // than the DP speedup wins. BANDMAP_FORCE_AVX512=1 overrides this.
             crate::align::dp::set_simd_cap(crate::align::dp::SimdCap::Avx2);
             *k = 21; *w = 11;
             opt.flags.insert(AlignFlags::SHORT_READ | AlignFlags::FRAG_MODE | AlignFlags::NO_PRINT_2ND | AlignFlags::HEAP_SORT);
@@ -1054,7 +1054,7 @@ pub struct DpAlignment {
 /// # Example
 ///
 /// ```
-/// use rammap::api::{dp_align, DpScoring, encode_nt4};
+/// use bandmap::api::{dp_align, DpScoring, encode_nt4};
 ///
 /// let query = encode_nt4(b"ACGTACGTACGT");
 /// let target = encode_nt4(b"ACGTACCTACGT");
@@ -1343,7 +1343,7 @@ mod tests {
 
     #[test]
     fn test_from_index_derives_chn_pen_gap_from_index_k() {
-        let path = std::env::temp_dir().join("rammap_api_from_index_k25.rmmi");
+        let path = std::env::temp_dir().join("bandmap_api_from_index_k25.rmmi");
         let p = path.to_str().unwrap();
         Aligner::builder(Preset::MapOnt).k(25).w(20).from_seqs(test_seqs()).unwrap()
             .save_index(p).unwrap();
@@ -1480,7 +1480,7 @@ mod tests {
 
         // Write a small BED6 file (contig, start, end, name, score, strand).
         let mut path = std::env::temp_dir();
-        path.push(format!("rammap_junc_test_{}.bed", std::process::id()));
+        path.push(format!("bandmap_junc_test_{}.bed", std::process::id()));
         std::fs::write(&path, "ctg1\t5\t25\t.\t0\t+\n").expect("write test BED");
 
         aligner
@@ -1499,7 +1499,7 @@ mod tests {
         assert!(aligner.junc_db.is_none());
 
         let mut path = std::env::temp_dir();
-        path.push(format!("rammap_spsc_test_{}.tsv", std::process::id()));
+        path.push(format!("bandmap_spsc_test_{}.tsv", std::process::id()));
         std::fs::write(&path, "ctg1\t10\t+\tD\t5\nctg1\t20\t+\tA\t5\n")
             .expect("write test SPSC");
 
@@ -1565,7 +1565,7 @@ mod tests {
         // Same alignment, with the true intron annotated as a junction.
         let mut a1 = Aligner::from_seqs(vec![("chr1".to_string(), reference)], Preset::Splice);
         let mut path = std::env::temp_dir();
-        path.push(format!("rammap_junc_behavior_{}.bed", std::process::id()));
+        path.push(format!("bandmap_junc_behavior_{}.bed", std::process::id()));
         std::fs::write(&path, format!("chr1\t{}\t{}\t.\t0\t+\n", intron_start, intron_end))
             .expect("write test BED");
         a1.load_junctions_bed(path.to_str().unwrap()).expect("load_junctions_bed");
@@ -1614,7 +1614,7 @@ mod tests {
         // Same alignment, with the true intron loaded via jump BED12.
         let mut a1 = Aligner::from_seqs(vec![("chr1".to_string(), reference)], Preset::SpliceSr);
         let mut path = std::env::temp_dir();
-        path.push(format!("rammap_jumpdb_behavior_{}.bed", std::process::id()));
+        path.push(format!("bandmap_jumpdb_behavior_{}.bed", std::process::id()));
         // The target junction twice (two different transcripts sharing the same intron, as
         // real annotations routinely do) to verify that JumpDb::load is deduping these junctions.
         std::fs::write(

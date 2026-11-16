@@ -1605,7 +1605,7 @@ pub fn extend_single_affine(
 ///
 /// Uses the same Suzuki-Kasahara anti-diagonal sweep and 3-state traceback
 /// as the SIMD implementations, producing identical results. This is the
-/// fallback for non-SIMD architectures and for `RAMMAP_FORCE_SCALAR=1`.
+/// fallback for non-SIMD architectures and for `BANDMAP_FORCE_SCALAR=1`.
 pub fn extend_single_affine_scalar(
     qseq: &[u8],
     tseq: &[u8],

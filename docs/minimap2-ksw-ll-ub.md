@@ -119,9 +119,9 @@ position achieves `gmax`), `*qe` stays at its initial value of -1 and the
 caller should treat the alignment as not found. The equivalent change in
 `ksw2_ll_neon.c` and any other SIMD variant is identical.
 
-## rammap's handling
+## bandmap's handling
 
-rammap applies the clamp above in its Rust reimplementation of
+bandmap applies the clamp above in its Rust reimplementation of
 `ksw_ll_i16` (commit `0ed9642`). Additionally, `try_align_inversion`
 includes an explicit bounds check that minimap2 lacks:
 
@@ -132,6 +132,6 @@ if q_off < 0 || q_off >= ql || t_off < 0 || t_off >= tl {
 }
 ```
 
-This means rammap never produces the 6 inversion records that minimap2
+This means bandmap never produces the 6 inversion records that minimap2
 generates via UB. These records all have zero chaining support (`cm:i:0,
 s1:i:0`) and are low-confidence secondary alignments.

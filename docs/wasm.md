@@ -1,6 +1,6 @@
 # WebAssembly Support
 
-rammap compiles to WebAssembly with SIMD128 support, running the full alignment
+bandmap compiles to WebAssembly with SIMD128 support, running the full alignment
 pipeline (index build, seeding, chaining, DP extension, output formatting) in
 the browser or via WASI runtimes like wasmtime.
 
@@ -91,7 +91,7 @@ The steady-state memory needed to index an N-base reference is:
 
 For hs1 (T2T human, 3.1 Gb): packed ≈ 1.5 GB + buckets ≈ 2.6 GB ≈ 4.3 GB of
 index, before counting any working memory. That exceeds the WASM32 ceiling
-even under perfect allocation. Use the native rammap CLI for genome-scale
+even under perfect allocation. Use the native bandmap CLI for genome-scale
 references.
 
 The demo's drop-zone surfaces a warning when a reference file is dropped that
@@ -174,13 +174,13 @@ bash scripts/build-wasm.sh
 
 Uses stable Rust. Output in `pkg/` at the repo root. No special browser requirements.
 
-The wasm bindings live in the `rammap-core` library crate (whose crate name is
-`rammap`, so the wasm-pack artifact is `pkg/rammap.js`). The script builds that
+The wasm bindings live in the `bandmap-core` library crate (whose crate name is
+`bandmap`, so the wasm-pack artifact is `pkg/bandmap.js`). The script builds that
 crate and relocates its `pkg/` to the repo root so the `web/` demo's
-`../pkg/rammap.js` import resolves. Equivalent to:
+`../pkg/bandmap.js` import resolves. Equivalent to:
 ```bash
-(cd rammap-core && wasm-pack build --target web --release --no-default-features)
-mv rammap-core/pkg pkg
+(cd bandmap-core && wasm-pack build --target web --release --no-default-features)
+mv bandmap-core/pkg pkg
 ```
 (Don't pass `wasm-pack`'s `--out-dir` — it's forwarded to cargo as the
 nightly-only `--artifact-dir`.)
@@ -215,7 +215,7 @@ The build script:
 
 ### Cargo.toml Features
 
-The WASM bindings build from the `rammap-core` library crate. Its features:
+The WASM bindings build from the `bandmap-core` library crate. Its features:
 
 | Feature | Effect |
 |---------|--------|
@@ -223,7 +223,7 @@ The WASM bindings build from the `rammap-core` library crate. Its features:
 | `wasm-threads` | Enables `rayon` + `wasm-bindgen-rayon` for browser threading |
 | (no features, i.e. `--no-default-features`) | Single-threaded WASM |
 
-The CLI is a separate crate (`rammap`, which depends on `rammap-core`) and owns
+The CLI is a separate crate (`bandmap`, which depends on `bandmap-core`) and owns
 the binary plus the allocator opt-ins (`jemalloc`/`mimalloc`); there is no longer
 a `cli` feature on the library.
 
@@ -299,7 +299,7 @@ Tests in `wasm_lib.rs`:
 WASM alignment output should be identical to native for the same input. The
 `wasm-pack test --node` unit tests above exercise this on small cases; for
 larger inputs, diff the browser demo's output (`web/`) against the native
-`rammap` CLI on the same reference and reads.
+`bandmap` CLI on the same reference and reads.
 
 ---
 

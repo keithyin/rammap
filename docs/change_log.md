@@ -1,23 +1,44 @@
 # Changelog
 
+## 2026-11-16 更名为 bandmap 并发布 2.0.0
+
+### 概述
+
+项目在上游 [jwanglab/rammap](https://github.com/jwanglab/rammap) 1.2.0 的基础上扩展，因 `rammap`/`rammap-core` 包名已被上游占用，更名为 **bandmap**并以 2.0.0 首次发布到 crates.io：
+
+- 库 crate：`bandmap-core`（lib 名 `bandmap`）；CLI crate 与二进制：`bandmap`
+- workspace 版本统一为 `2.0.0`，`repository` 指向 [keithyin/rammap](https://github.com/keithyin/rammap)
+
+### 破坏性变更
+
+- **环境变量**：`RAMMAP_FORCE_SCALAR`、`RAMMAP_FORCE_SSE`、`RAMMAP_FORCE_AVX2`、`RAMMAP_FORCE_AVX512`、`RAMMAP_FORCE_SCALAR_CHAIN`、`RAMMAP_COMPARE_SCALAR`、`RAMMAP_DP_CACHE_CAP_MB` 全部更名为 `BANDMAP_*` 前缀（同名语义不变）
+- **二进制名**：`rammap` → `bandmap`，SAM `@PG` 头的 `ID`/`PN` 字段同步变更
+- **依赖写法**：`rammap-core = "1.2.0"` → `bandmap-core = "2.0.0"`，代码导入 `use rammap::` → `use bandmap::`
+- 索引文件格式（RMMI magic、`.rmmi`/`.mmi`/`.idx` 扩展名）保持不变，已有索引文件仍可加载
+
+### 配套变更
+
+- 新增 GitHub Actions CI（全平台 build/test/lint/package）与 Release（tag 触发、5 目标二进制、按序发布 bandmap-core → bandmap 到 crates.io）
+- WASM 构建产物更名为 `pkg/bandmap.js` / `pkg/bandmap_bg.wasm`，web demo 与构建脚本同步更新
+
 ## 2026-11-16 对角线直方图 top-K anchor 过滤
 
 ### 概述
 
-将原型 `prototype/anchor_filter/diag_topk.py`（`diagonal_filter`，topk 模式）实现到 rammap-core，插入 anchor（seed hit）收集之后、DP 链化之前，缓解低复杂/重复区域高频 seed 导致的 anchor 组合爆炸（典型场景：pacbio CCS subreads 到 draft 的比对，比对集中在单一对角线上）。
+将原型 `prototype/anchor_filter/diag_topk.py`（`diagonal_filter`，topk 模式）实现到 bandmap-core，插入 anchor（seed hit）收集之后、DP 链化之前，缓解低复杂/重复区域高频 seed 导致的 anchor 组合爆炸（典型场景：pacbio CCS subreads 到 draft 的比对，比对集中在单一对角线上）。
 
 ### 变更文件
 
-- **[NEW]** `rammap-core/src/align/diag_filter.rs`
+- **[NEW]** `bandmap-core/src/align/diag_filter.rs`
   - `DiagFilterParams`：过滤参数（默认：关闭、bucket_size=100、topk=2、neighbor=±1）
   - `filter_anchors_diagonal()`：按 `ref_id_strand()` 连续分组 → `d = ref_pos - query_pos` 分桶 → 计数降序取 top-K（平局按桶号升序）→ 保留选桶 ±neighbor 内 anchor；in-place 复制保持 x 排序，输出可直接喂给链化
   - 7 个单元测试：top-K 过滤、邻桶扩展、平局选桶、分组独立性（ref+strand）、负对角线 floor 语义、空/禁用边界、默认值对照原型
-- **[MODIFY]** `rammap-core/src/align/mod.rs`：声明 `pub mod diag_filter`
-- **[MODIFY]** `rammap-core/src/align/map.rs`
+- **[MODIFY]** `bandmap-core/src/align/mod.rs`：声明 `pub mod diag_filter`
+- **[MODIFY]** `bandmap-core/src/align/map.rs`
   - `ChainingParams` 新增 `diag_filter` 字段，`MapOptions::default()` 补默认值
   - 仅在 `map_query` / `map_query_multi` 两条主路径链化调用前插入过滤
   - 6 处测试 `ChainingParams` 构造点补字段（chain.rs / chain_rmq.rs / chain_simple.rs / chain_simd.rs ×3）
-- **[MODIFY]** `rammap/src/main.rs`：新增 4 个 CLI 参数
+- **[MODIFY]** `bandmap/src/main.rs`：新增 4 个 CLI 参数
 
 ### CLI 参数
 

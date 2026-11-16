@@ -1,4 +1,4 @@
-# rammap
+# bandmap
 
 A pure-Rust extensible sequence aligner and mapper mirroring the interface and producing identical output to [minimap2](https://github.com/lh3/minimap2).
 
@@ -9,8 +9,8 @@ Supports all minimap2 presets (map-ont, map-hifi, sr, splice, asm, ava) with ful
 
 ```bash
 cargo build --release
-./target/release/rammap -x map-ont -c reference.fa reads.fq > alignments.paf
-./target/release/rammap -x sr -a reference.fa reads_R1.fq reads_R2.fq > alignments.sam
+./target/release/bandmap -x map-ont -c reference.fa reads.fq > alignments.paf
+./target/release/bandmap -x sr -a reference.fa reads_R1.fq reads_R2.fq > alignments.sam
 ```
 
 ### Presets
@@ -31,31 +31,31 @@ cargo build --release
 | `asm5` / `asm10` / `asm20` | Assembly-to-reference (~0.1% / 1% / 5% divergence) |
 | `ava-ont` / `ava-pb` | All-vs-all overlap |
 
-Run `rammap -x --help` for the full list of accepted preset names and aliases.
+Run `bandmap -x --help` for the full list of accepted preset names and aliases.
 
 ## Library API
 
-rammap can be used as a Rust library for programmatic alignment, with an API
+bandmap can be used as a Rust library for programmatic alignment, with an API
 compatible with [minimap2-rs](https://github.com/jguhlin/minimap2-rs).
 
 ### Add to your project
 
 ```toml
 [dependencies]
-# The library is published as `rammap-core` but imported in code as `rammap`
-# (e.g. `use rammap::api::Aligner;`).
-rammap-core = { version = "1.2.0", default-features = false, features = ["parallel"] }
+# The library is published as `bandmap-core` but imported in code as `bandmap`
+# (e.g. `use bandmap::api::Aligner;`).
+bandmap-core = { version = "2.0.0", default-features = false, features = ["parallel"] }
 ```
 
-Library features (on `rammap-core`): `parallel` (rayon-based threading), `wasm-threads`
-(browser-side rayon for WASM builds). The CLI is a separate crate (`rammap`, which
-depends on `rammap-core`) and provides the binary plus the `jemalloc` / `mimalloc`
+Library features (on `bandmap-core`): `parallel` (rayon-based threading), `wasm-threads`
+(browser-side rayon for WASM builds). The CLI is a separate crate (`bandmap`, which
+depends on `bandmap-core`) and provides the binary plus the `jemalloc` / `mimalloc`
 opt-in global allocators (off by default).
 
 ### Example
 
 ```rust
-use rammap::{Aligner, Preset, Strand};
+use bandmap::{Aligner, Preset, Strand};
 
 fn main() -> std::io::Result<()> {
     // Load a reference (from FASTA or pre-built .mmi index)
@@ -118,7 +118,7 @@ let result = aligner.map_seq("read_name", sequence_bytes);
 let result = aligner.map_pair("read_name", seq_r1, seq_r2);
 
 // Per-call CS/MD tag toggle
-use rammap::MapOpts;
+use bandmap::MapOpts;
 let result = aligner.map_seq_with("read1", seq, MapOpts { cs: Some(true), md: Some(true) });
 assert!(result.mappings[0].cs.is_some());
 
@@ -185,7 +185,7 @@ The SIMD-optimized DP engine can be used directly for pairwise sequence
 alignment, without the full mapping pipeline:
 
 ```rust
-use rammap::{dp_align, dp_global, dp_local, dp_extension, DpScoring, encode_nt4};
+use bandmap::{dp_align, dp_global, dp_local, dp_extension, DpScoring, encode_nt4};
 
 // Encode sequences to nt4 (A=0, C=1, G=2, T=3, N=4)
 let query  = encode_nt4(b"ACGTACGTACGT");
@@ -222,7 +222,7 @@ The DP engine automatically selects the best SIMD backend (AVX512 > AVX2 > SSE4.
 cargo build --release
 
 # Library only (no CLI dependencies)
-cargo build -p rammap-core --release --no-default-features --features parallel
+cargo build -p bandmap-core --release --no-default-features --features parallel
 
 # Run tests
 cargo test
@@ -250,7 +250,7 @@ See [`docs/wasm.md`](docs/wasm.md) for WASM build instructions, web demo, and be
 
 ## Python
 
-[`rammappy`](https://github.com/tomdstanton/rammappy) is an externally maintained module that provides Python bindings directly to the `rammap-core` API via PyO3.
+[`rammappy`](https://github.com/tomdstanton/rammappy) is an externally maintained module that provides Python bindings directly to the `bandmap-core` API via PyO3.
 
 ## License
 

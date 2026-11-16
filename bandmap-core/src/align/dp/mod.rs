@@ -6,7 +6,7 @@
 //! `extend_dual_affine`, and `extend_splice`; each dispatches to the best available
 //! SIMD variant at runtime, optionally capped per-preset (e.g., `sr`/`ava-*` cap
 //! at AVX2 to avoid AVX-512 license throttling). Override-able via env vars:
-//! `RAMMAP_FORCE_SCALAR`, `RAMMAP_FORCE_SSE`, `RAMMAP_FORCE_AVX2`, `RAMMAP_FORCE_AVX512`.
+//! `BANDMAP_FORCE_SCALAR`, `BANDMAP_FORCE_SSE`, `BANDMAP_FORCE_AVX2`, `BANDMAP_FORCE_AVX512`.
 //!
 //! All kernels return a `DpResult` containing the alignment score, the query/target
 //! end positions, the number of columns computed, and an optional CIGAR. Callers in
@@ -29,10 +29,10 @@ use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 /// Other presets leave this `Auto` and use AVX-512 when available.
 ///
 /// Override with env vars (highest priority first):
-/// - `RAMMAP_FORCE_SCALAR=1`
-/// - `RAMMAP_FORCE_SSE=1`
-/// - `RAMMAP_FORCE_AVX2=1`
-/// - `RAMMAP_FORCE_AVX512=1` (overrides preset cap; opt back into AVX-512)
+/// - `BANDMAP_FORCE_SCALAR=1`
+/// - `BANDMAP_FORCE_SSE=1`
+/// - `BANDMAP_FORCE_AVX2=1`
+/// - `BANDMAP_FORCE_AVX512=1` (overrides preset cap; opt back into AVX-512)
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SimdCap {
@@ -53,15 +53,15 @@ pub fn set_simd_cap(cap: SimdCap) {
 
 /// Per-process cap (bytes) on the size of a DP scratch buffer that the thread-local
 /// `DP_MEM_CACHE` retains between alignments. `usize::MAX` is a sentinel for "not yet
-/// resolved": on first use it is initialized from `RAMMAP_DP_CACHE_CAP_MB` (megabytes)
+/// resolved": on first use it is initialized from `BANDMAP_DP_CACHE_CAP_MB` (megabytes)
 /// or [`DEFAULT_DP_CACHE_CAP_MB`]. [`set_dp_cache_cap_mb`] overrides it at runtime.
 static DP_CACHE_CAP_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 /// Default per-thread DP cache retention cap, in megabytes, when neither
-/// [`set_dp_cache_cap_mb`] nor `RAMMAP_DP_CACHE_CAP_MB` is set.
+/// [`set_dp_cache_cap_mb`] nor `BANDMAP_DP_CACHE_CAP_MB` is set.
 pub const DEFAULT_DP_CACHE_CAP_MB: usize = 128;
 
-/// Pass to [`set_dp_cache_cap_mb`] (or set `RAMMAP_DP_CACHE_CAP_MB=0`) to disable the
+/// Pass to [`set_dp_cache_cap_mb`] (or set `BANDMAP_DP_CACHE_CAP_MB=0`) to disable the
 /// cap entirely, restoring the original unbounded high-water-mark caching behavior —
 /// each thread retains its largest-ever DP buffer for the lifetime of the run.
 pub const DP_CACHE_UNBOUNDED: usize = 0;
@@ -72,7 +72,7 @@ pub const DP_CACHE_UNBOUNDED: usize = 0;
 /// counts (the minimap2 `cap_kalloc` analog). Pass [`DP_CACHE_UNBOUNDED`] (`0`) to
 /// disable the cap entirely, restoring unbounded high-water-mark caching.
 ///
-/// Overrides both the [`DEFAULT_DP_CACHE_CAP_MB`] default and the `RAMMAP_DP_CACHE_CAP_MB`
+/// Overrides both the [`DEFAULT_DP_CACHE_CAP_MB`] default and the `BANDMAP_DP_CACHE_CAP_MB`
 /// environment variable for all subsequent alignments on every thread. Process-global,
 /// like [`set_simd_cap`]; call once during setup.
 pub fn set_dp_cache_cap_mb(mb: usize) {
@@ -80,7 +80,7 @@ pub fn set_dp_cache_cap_mb(mb: usize) {
 }
 
 /// Resolve the current DP cache cap in bytes (`0` = no cap), initializing from
-/// `RAMMAP_DP_CACHE_CAP_MB` (or the default) on first use.
+/// `BANDMAP_DP_CACHE_CAP_MB` (or the default) on first use.
 #[inline]
 pub(crate) fn dp_cache_cap_bytes() -> usize {
     let v = DP_CACHE_CAP_BYTES.load(Ordering::Relaxed);
@@ -89,7 +89,7 @@ pub(crate) fn dp_cache_cap_bytes() -> usize {
     }
     // First use with no explicit override: derive from the environment (or default).
     // Idempotent under races — every thread computes the same value.
-    let mb = std::env::var("RAMMAP_DP_CACHE_CAP_MB")
+    let mb = std::env::var("BANDMAP_DP_CACHE_CAP_MB")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(DEFAULT_DP_CACHE_CAP_MB);

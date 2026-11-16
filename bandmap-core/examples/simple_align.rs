@@ -1,4 +1,4 @@
-//! Minimal example: align a sequence against a reference using the rammap API.
+//! Minimal example: align a sequence against a reference using the bandmap API.
 //!
 //! Usage:
 //!   cargo run --release --example simple_align -- <reference.fa> <query.fq>
@@ -6,7 +6,7 @@
 //! Example:
 //!   cargo run --release --example simple_align -- tests/inttest/chr20.fa tests/inttest/ont_5000.fq
 
-use rammap::{Aligner, Preset, Strand};
+use bandmap::{Aligner, Preset, Strand};
 use std::env;
 use std::process;
 
@@ -29,7 +29,7 @@ fn main() {
 
     // Open reads and align each one
     eprintln!("[*] Aligning reads from: {}", reads_path);
-    let reader = rammap::fasta::open(reads_path).expect("Failed to open reads");
+    let reader = bandmap::fasta::open(reads_path).expect("Failed to open reads");
     let mut n_reads = 0;
     let mut n_aligned = 0;
 

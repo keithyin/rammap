@@ -1,15 +1,15 @@
 [package]
-name = "rammap-core"
-description = "Core alignment/read-mapping library for rammap"
+name = "bandmap-core"
+description = "Core alignment/read-mapping library for bandmap"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
 
-# the crate is imported as `rammap`
+# the crate is imported as `bandmap`
 [lib]
-name = "rammap"
+name = "bandmap"
 crate-type = ["cdylib", "rlib"]
 
 [features]

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>rammap 比对管线详解 — 从 minimizer 到 PAF（low_complexity 实例）</title>
+<title>bandmap 比对管线详解 — 从 minimizer 到 PAF（low_complexity 实例）</title>
 <style>
   :root {
     --bg: #fafaf7; --card: #ffffff; --ink: #1f2430; --muted: #6b7280;
@@ -57,9 +57,9 @@
 <div class="wrap">
 
 <header class="hero">
-  <h1>rammap 比对管线详解 — 从 minimizer 到 PAF</h1>
+  <h1>bandmap 比对管线详解 — 从 minimizer 到 PAF</h1>
   <p class="sub">以 low_complexity 组的一条真实 read 为例，逐步走通 Sketch → Seed → Anchor → DP Chain → Alignment 全流程。<br>
-  实验设置：<code>-x map-ont -k 12 -w 5 --no-long-join</code>，单线程。所有数字均来自对 rammap 管线的逐行复现（校验见附录 C）。</p>
+  实验设置：<code>-x map-ont -k 12 -w 5 --no-long-join</code>，单线程。所有数字均来自对 bandmap 管线的逐行复现（校验见附录 C）。</p>
 </header>
 
 <nav class="toc">
@@ -145,7 +145,7 @@
 
 <div class="card">
 <h3>3.1 原理</h3>
-<p>序列不能直接存进索引，需要先压缩成一组"代表 k-mer"。rammap 使用与 minimap2 完全一致的
+<p>序列不能直接存进索引，需要先压缩成一组"代表 k-mer"。bandmap 使用与 minimap2 完全一致的
 <b>(w, k)-minimizer</b> 方案（<code>sketch.rs::sketch_sequence_impl</code>）：</p>
 <ol>
   <li>把序列按窗口滑动，每个位置得到一个 k-mer（k = 12）及其反向互补 k-mer，取<b>字典序较小的那个</b>作为正则形式（这样无论序列出现在哪条链都能命中同一个 hash）；对称 k-mer 被跳过。</li>
@@ -525,7 +525,7 @@ query 的较大部分（&gt;1000 bp 未覆盖或覆盖 &gt;10%），会用 <code
 <h3>B. 代码索引</h3>
 <table>
   <tr><th>阶段</th><th>位置</th></tr>
-  <tr><td>minimizer sketch</td><td><code>rammap-core/src/align/sketch.rs::sketch_sequence_impl</code></td></tr>
+  <tr><td>minimizer sketch</td><td><code>bandmap-core/src/align/sketch.rs::sketch_sequence_impl</code></td></tr>
   <tr><td>k-mer 哈希</td><td><code>sketch.rs::kmer_hash</code></td></tr>
   <tr><td>q_occ 过滤</td><td><code>seed.rs::filter_minimizers_by_occ</code></td></tr>
   <tr><td>种子收集 + select_seeds + rep_len</td><td><code>seed.rs::collect_anchor_matches</code></td></tr>
@@ -540,14 +540,14 @@ query 的较大部分（&gt;1000 bp 未覆盖或覆盖 &gt;10%），会用 <code
 
 <h3>C. 复现与校验</h3>
 <div class="good">
-本教程的所有 per-read 数字来自对 rammap 管线的独立 Python 复现（sketch、q_occ 过滤、select_seeds、anchor 编码、
-不稳定 MSD radix sort、标量 DP 链化、回溯均逐行移植，f32 语义精确模拟）。与 rammap 官方输出的对照：
+本教程的所有 per-read 数字来自对 bandmap 管线的独立 Python 复现（sketch、q_occ 过滤、select_seeds、anchor 编码、
+不稳定 MSD radix sort、标量 DP 链化、回溯均逐行移植，f32 语义精确模拟）。与 bandmap 官方输出的对照：
 <ul>
   <li>61 条 read minimizer 总数：<b>33,584 = 33,584</b> ✓（逐位一致）</li>
   <li>anchor 总数：<b>31,442 = 31,442</b> ✓（逐位一致）</li>
   <li>入链 anchor 总数：<b>15,755 = 15,755</b> ✓（逐位一致）</li>
   <li>示例 read 的 DP 逐 anchor 复核：scores 与 preds 数组与 Rust 真值（经 rstest 调用 <code>chain_anchors</code> 生成）<b>0/652 差异</b> ✓</li>
-  <li>示例 read：rammap 单 read 统计 Seeds 557 / Anchors 652 / Chains 322 与复现完全一致；最优链
+  <li>示例 read：bandmap 单 read 统计 Seeds 557 / Anchors 652 / Chains 322 与复现完全一致；最优链
       (score 1074, 238 anchors) 与 PAF tag <code>s1:i:1074</code>、<code>cm:i:238</code> 完全对应 ✓</li>
 </ul>
 </div>
@@ -556,8 +556,8 @@ query 的较大部分（&gt;1000 bp 未覆盖或覆盖 &gt;10%），会用 <code
 </div>
 
 <footer>
-rammap (minimap2-compatible aligner) pipeline tutorial · 生成于 2026-11-13 ·
-数据: test_data/low_complexity_{target,queries}.fa · 命令: <code>rammap -x map-ont -k 12 -w 5 -t 1 --no-long-join ref.idx queries.fa</code>
+bandmap (minimap2-compatible aligner) pipeline tutorial · 生成于 2026-11-13 ·
+数据: test_data/low_complexity_{target,queries}.fa · 命令: <code>bandmap -x map-ont -k 12 -w 5 -t 1 --no-long-join ref.idx queries.fa</code>
 </footer>
 
 <script>

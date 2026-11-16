@@ -1,6 +1,6 @@
-# rammap Architecture Reference
+# bandmap Architecture Reference
 
-**rammap** is a pure-Rust minimap2-compatible sequence aligner producing byte-identical output via the same algorithms. It supports all major minimap2 presets (map-ont, map-hifi, sr, splice, asm, ava) with full CIGAR, CS/MD/DS tag, SAM, and PAF output.
+**bandmap** is a pure-Rust minimap2-compatible sequence aligner producing byte-identical output via the same algorithms. It supports all major minimap2 presets (map-ont, map-hifi, sr, splice, asm, ava) with full CIGAR, CS/MD/DS tag, SAM, and PAF output.
 
 Standalone crate with both `src/lib.rs` (library) and `src/main.rs` (binary). The alignment engine lives under `src/align/`; FASTA/FASTQ I/O under `src/fasta/`.
 
@@ -83,7 +83,7 @@ src/
 
 ### Entry Point (`src/main.rs`)
 
-rammap's CLI lives entirely in `main.rs` (no separate `cli.rs` or `commands/` directory). The `AlignArgs` struct defines all command-line arguments via clap, and `run()` orchestrates the alignment pipeline.
+bandmap's CLI lives entirely in `main.rs` (no separate `cli.rs` or `commands/` directory). The `AlignArgs` struct defines all command-line arguments via clap, and `run()` orchestrates the alignment pipeline.
 
 ```
 main() → AlignArgs::parse() → run(args)

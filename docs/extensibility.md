@@ -1,6 +1,6 @@
 # Extensible Pipeline Architecture
 
-rammap's alignment pipeline is built around trait-based interfaces at each
+bandmap's alignment pipeline is built around trait-based interfaces at each
 major stage. Each stage has a production implementation and one or more
 alternative implementations that can be swapped in at compile time — no
 runtime overhead, no code changes to the rest of the pipeline.
@@ -49,8 +49,8 @@ pub trait Sketcher {
 **Example — syncmer sketcher:**
 
 ```rust
-use rammap::align::syncmer::SyncmerSketcher;
-use rammap::align::sketch::Sketcher;
+use bandmap::align::syncmer::SyncmerSketcher;
+use bandmap::align::sketch::Sketcher;
 
 let sketcher = SyncmerSketcher::new(15, 11); // k=15, s=11
 let mut seeds = Vec::new();
@@ -86,8 +86,8 @@ anchors forming a consecutive slice.
 **Example — greedy chainer:**
 
 ```rust
-use rammap::align::chain_simple::GreedyChainer;
-use rammap::align::map::{Chainer, ChainingBuffers};
+use bandmap::align::chain_simple::GreedyChainer;
+use bandmap::align::map::{Chainer, ChainingBuffers};
 
 let chainer = GreedyChainer;
 let mut bufs = ChainingBuffers::new();
@@ -125,8 +125,8 @@ manages the offset to absolute chromosome positions).
 **Example — NW aligner:**
 
 ```rust
-use rammap::align::align_simple::NWAligner;
-use rammap::align::map::Aligner;
+use bandmap::align::align_simple::NWAligner;
+use bandmap::align::map::Aligner;
 
 let aligner = NWAligner;
 let result = aligner.align(&mut anchors, &qseq, &tseq, &opt, &mut ctx, &call);
@@ -255,8 +255,8 @@ Use the Cargo feature pattern shown above, or call it directly via the
 library API for experimentation:
 
 ```rust
-use rammap::align::my_sketcher::MyCustomSketcher;
-use rammap::align::sketch::Sketcher;
+use bandmap::align::my_sketcher::MyCustomSketcher;
+use bandmap::align::sketch::Sketcher;
 
 let sketcher = MyCustomSketcher { k: 15 };
 let mut seeds = Vec::new();

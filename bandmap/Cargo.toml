@@ -1,5 +1,5 @@
 [package]
-name = "rammap"
+name = "bandmap"
 description = "An extensible and performant aligner and read mapper"
 version.workspace = true
 edition.workspace = true
@@ -8,12 +8,12 @@ repository.workspace = true
 readme.workspace = true
 
 [[bin]]
-name = "rammap"
+name = "bandmap"
 path = "src/main.rs"
 
 [features]
 default = ["parallel"]
-parallel = ["rammap-core/parallel", "dep:rayon"]
+parallel = ["bandmap-core/parallel", "dep:rayon"]
 
 # Allocator opt-ins (need a C toolchain at build time; mimalloc wins if both set):
 #   cargo build --release                       → Rust system allocator (default)
@@ -23,7 +23,7 @@ jemalloc = ["dep:tikv-jemallocator"]
 mimalloc = ["dep:mimalloc"]
 
 [dependencies]
-rammap-core = { path = "../rammap-core", version = "1.2.0", default-features = false }
+bandmap-core = { path = "../bandmap-core", version = "2.0.0", default-features = false }
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"

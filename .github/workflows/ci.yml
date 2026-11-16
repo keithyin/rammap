@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  # 供 release.yml 通过 `uses: ./.github/workflows/ci.yml` 复用，
+  # 保证打 tag 时跑的是同一套 CI。
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # SIMD 后端（AVX512/AVX2/SSE/NEON/WASM）在运行时自动分发，
+        # 无编译期平台限制，因此全平台矩阵测试。
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --locked --workspace --verbose
+
+      - name: Run tests
+        run: cargo test --locked --workspace --verbose
+
+      - name: Build library only (no CLI, no dependencies)
+        run: cargo build --locked --release --no-default-features -p bandmap-core
+
+  lint:
+    name: Lint (fmt & clippy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        continue-on-error: true
+        run: cargo clippy --locked --workspace --all-targets
+
+      # 提前验证 crates.io 打包（元数据/文件列表/大小），避免打 tag 后才发现。
+      # 只预检 bandmap-core：cargo package -p bandmap（CLI）需要在 registry 上
+      # 能解析 bandmap-core 依赖，core 未发布前（首个版本）必然失败；
+      # CLI 的打包验证由 release.yml 在发布 core 之后 dry-run 完成。
+      # 根目录 readme 在包外属预期 warning。
+      - name: Check crates.io packaging
+        run: cargo package --locked -p bandmap-core

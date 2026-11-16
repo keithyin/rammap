@@ -2890,7 +2890,7 @@ pub(super) unsafe fn extend_splice_neon_impl(
 ///
 /// Anti-diagonal DP with difference-encoded state arrays (u, v, x, y, x2),
 /// matching the SIMD implementation exactly but with scalar i8 operations.
-/// Used as fallback on non-SIMD targets and for testing via `RAMMAP_FORCE_SCALAR=1`.
+/// Used as fallback on non-SIMD targets and for testing via `BANDMAP_FORCE_SCALAR=1`.
 pub fn extend_splice_scalar(
     qseq: &[u8],
     tseq: &[u8],

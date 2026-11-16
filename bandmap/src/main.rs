@@ -15,18 +15,18 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-use rammap::align::index::Index;
-use rammap::align::map::{MapOptions, AlignFlags};
-use rammap::align::pipeline::{OutputConfig, ReadInfo};
-use rammap::align::stats::AlignmentStats;
-use rammap::align::junc::{self, JunctionDb};
-use rammap::align::jump::JumpDb;
-use rammap::align::split;
+use bandmap::align::index::Index;
+use bandmap::align::map::{MapOptions, AlignFlags};
+use bandmap::align::pipeline::{OutputConfig, ReadInfo};
+use bandmap::align::stats::AlignmentStats;
+use bandmap::align::junc::{self, JunctionDb};
+use bandmap::align::jump::JumpDb;
+use bandmap::align::split;
 
 // ─── CLI definition ───
 
 #[derive(Parser, Debug)]
-#[command(name = "rammap")]
+#[command(name = "bandmap")]
 #[command(version, about = "A pure-Rust minimap2-compatible sequence aligner")]
 struct Cli {
     #[command(flatten)]
@@ -511,7 +511,7 @@ fn parse_num(s: &str) -> i64 {
 /// Apply preset configurations.
 /// The `is_hpc` output indicates whether homopolymer compression should be used.
 fn apply_preset(opt: &mut MapOptions, k: &mut usize, w: &mut usize, is_hpc: &mut bool, preset: &str) -> anyhow::Result<()> {
-    rammap::api::apply_preset_str(opt, k, w, is_hpc, preset).map_err(|e| anyhow::anyhow!("{}", e))
+    bandmap::api::apply_preset_str(opt, k, w, is_hpc, preset).map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 fn run(cli: AlignArgs) -> anyhow::Result<()> {
@@ -741,7 +741,7 @@ fn run(cli: AlignArgs) -> anyhow::Result<()> {
         opt.filtering.chain_skip_scale = v;
     }
     // Recompute chaining penalties after all CLI overrides
-    rammap::api::finalize_options(&mut opt, k);
+    bandmap::api::finalize_options(&mut opt, k);
 
     let target_path = &cli.target;
     let batch_size: u64 = cli.batch_size.as_ref()
@@ -821,7 +821,7 @@ fn run(cli: AlignArgs) -> anyhow::Result<()> {
     // Each iteration yields one Index part. For small references or large batch_size,
     // this will be a single iteration (matching current behavior exactly).
     // Extension is just a naming convention and not always reliable (e.g. a real
-    // minimap2/rammap index saved under a non-standard name) — fall back to sniffing
+    // minimap2/bandmap index saved under a non-standard name) — fall back to sniffing
     // the file's magic bytes so a mis-named index isn't silently misread as sequence
     // input to build a new (bogus) index from.
     let is_idx_file = target_path.ends_with(".mmi") || target_path.ends_with(".idx") || target_path.ends_with(".rmmi")
@@ -911,7 +911,7 @@ fn run(cli: AlignArgs) -> anyhow::Result<()> {
             // Non-gz FASTA: try mmap for single-part fast path
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let all_seqs = rammap::fasta::read_fasta(target_path)
+                let all_seqs = bandmap::fasta::read_fasta(target_path)
                     .map_err(|e| anyhow::anyhow!("Error reading target: {}", e))?;
 
                 // Check if we need multiple parts
@@ -1043,7 +1043,7 @@ fn run(cli: AlignArgs) -> anyhow::Result<()> {
             }
         } else {
             // ─── Streaming FASTA/FASTQ: batch reading ───
-            let mut reader = rammap::fasta::open(target_path)
+            let mut reader = bandmap::fasta::open(target_path)
                 .map_err(|e| anyhow::anyhow!("Error reading target: {}", e))?;
             let mut dump_writer: Option<std::io::BufWriter<std::fs::File>> = if let Some(dump_path) = &cli.dump_index {
                 Some(std::io::BufWriter::new(std::fs::File::create(dump_path)
@@ -1163,7 +1163,7 @@ fn run(cli: AlignArgs) -> anyhow::Result<()> {
         eprintln!("  Reads: {}, Seeds: {}, Anchors: {}, Chains: {}",
             total_stats.n_reads, total_stats.n_seeds, total_stats.n_anchors, total_stats.n_chains);
         eprintln!("---------------------------");
-        rammap::align::map::print_post_chain_breakdown();
+        bandmap::align::map::print_post_chain_breakdown();
     }
 
     Ok(())
@@ -1183,10 +1183,10 @@ struct RunConfig<'a> {
 
 /// Map all queries against one index part. Re-opens query files for each part.
 /// Returns (stats, n_reads_processed).
-type FastxRecords = rammap::fasta::reader::RecordIter<Box<dyn std::io::BufRead + Send>>;
+type FastxRecords = bandmap::fasta::reader::RecordIter<Box<dyn std::io::BufRead + Send>>;
 type SeData = (String, Vec<u8>, Option<String>, Option<String>);
 
-fn next_ok_record(it: &mut FastxRecords) -> Option<rammap::fasta::Record> {
+fn next_ok_record(it: &mut FastxRecords) -> Option<bandmap::fasta::Record> {
     loop {
         match it.next() {
             Some(Ok(r)) => return Some(r),
@@ -1203,8 +1203,8 @@ fn next_ok_record(it: &mut FastxRecords) -> Option<rammap::fasta::Record> {
 fn next_fragment(
     it1: &mut FastxRecords,
     it2: Option<&mut FastxRecords>,
-    pending: &mut Option<rammap::fasta::Record>,
-) -> Option<(rammap::fasta::Record, Option<rammap::fasta::Record>)> {
+    pending: &mut Option<bandmap::fasta::Record>,
+) -> Option<(bandmap::fasta::Record, Option<bandmap::fasta::Record>)> {
     if let Some(it2) = it2 {
         loop {
             match (it1.next(), it2.next()) {
@@ -1223,7 +1223,7 @@ fn next_fragment(
         None => next_ok_record(it1)?,
     };
     match next_ok_record(it1) {
-        Some(r2) if rammap::align::pipeline::qname_same(r1.name(), r2.name()) => Some((r1, Some(r2))),
+        Some(r2) if bandmap::align::pipeline::qname_same(r1.name(), r2.name()) => Some((r1, Some(r2))),
         next => {
             *pending = next;
             Some((r1, None))
@@ -1237,8 +1237,8 @@ fn align_fragment(
     opt: &MapOptions,
     mi: &Index,
     frag: &(SeData, Option<SeData>),
-    ctx: &mut rammap::align::extend::AlignmentContext,
-    map_ctx: &mut rammap::align::map::MapContext,
+    ctx: &mut bandmap::align::extend::AlignmentContext,
+    map_ctx: &mut bandmap::align::map::MapContext,
     junc_db: Option<&JunctionDb>,
     jump_db: Option<&JumpDb>,
     out_cfg: &OutputConfig,
@@ -1249,9 +1249,9 @@ fn align_fragment(
         Some((qname2, qseq2, qual2, comment2)) => {
             let r1 = ReadInfo { n_seg: 2, ..r1 };
             let r2 = ReadInfo { qname: qname2, qseq: qseq2, qual: qual2.as_deref(), comment: comment2.as_deref(), n_seg: 2, seg_idx: 1 };
-            rammap::align::pipeline::align_and_format_pair(opt, mi, &r1, &r2, ctx, map_ctx, junc_db, out_cfg)
+            bandmap::align::pipeline::align_and_format_pair(opt, mi, &r1, &r2, ctx, map_ctx, junc_db, out_cfg)
         }
-        None => rammap::align::pipeline::align_and_format_query(opt, mi, &r1, ctx, map_ctx, junc_db, jump_db, out_cfg),
+        None => bandmap::align::pipeline::align_and_format_query(opt, mi, &r1, ctx, map_ctx, junc_db, jump_db, out_cfg),
     }
 }
 
@@ -1328,7 +1328,7 @@ fn map_one_part(
         }
         let version = env!("CARGO_PKG_VERSION");
         let cmd_line = std::env::args().collect::<Vec<String>>().join(" ");
-        writeln!(handle, "@PG\tID:rammap\tPN:rammap\tVN:{}\tCL:{}", version, cmd_line)?;
+        writeln!(handle, "@PG\tID:bandmap\tPN:bandmap\tVN:{}\tCL:{}", version, cmd_line)?;
         if let Some(rg_line) = &cli.sam_rg {
             let expanded = rg_line.replace("\\t", "\t");
             writeln!(handle, "{}", expanded)?;
@@ -1344,11 +1344,11 @@ fn map_one_part(
         return Ok(AlignmentStats::default());
     }
 
-    let reader = rammap::fasta::open(query_path)
+    let reader = bandmap::fasta::open(query_path)
         .map_err(|e| anyhow::anyhow!("Error reading query: {}", e))?;
     let reader2 = if two_file_pe {
         let q2 = query2_path.unwrap();
-        Some(rammap::fasta::open(q2)
+        Some(bandmap::fasta::open(q2)
             .map_err(|e| anyhow::anyhow!("Error reading query2: {}", e))?)
     } else {
         None
@@ -1366,12 +1366,12 @@ fn map_one_part(
 
     if pe_mode {
         type PairData = (SeData, Option<SeData>);
-        let to_se = |r: rammap::fasta::Record| -> SeData {
+        let to_se = |r: bandmap::fasta::Record| -> SeData {
             let q = r.quality().map(|qs| String::from_utf8_lossy(qs).to_string());
             let c = if copy_comment { r.description().map(|s| s.to_string()) } else { None };
             (r.name().to_string(), r.sequence().to_vec(), q, c)
         };
-        let mut pending: Option<rammap::fasta::Record> = None;
+        let mut pending: Option<bandmap::fasta::Record> = None;
 
         // Three-stage pipeline: reader thread → worker pool → writer thread.
         // sync_channel(1) gives reader 1 chunk lookahead. The writer thread
@@ -1419,7 +1419,7 @@ fn map_one_part(
                     if chunk_data.is_empty() { break; }
 
                     let results: Vec<(String, AlignmentStats)> = chunk_data.par_iter().map_init(
-                        || (rammap::align::extend::AlignmentContext::new(), rammap::align::map::MapContext::new()),
+                        || (bandmap::align::extend::AlignmentContext::new(), bandmap::align::map::MapContext::new()),
                         |(ctx, map_ctx), frag| {
                             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 align_fragment(opt, mi, frag, ctx, map_ctx, junc_db.as_ref(), jump_db.as_ref(), out_cfg)
@@ -1461,8 +1461,8 @@ fn map_one_part(
                 if chunk_data.is_empty() { break; }
 
                 let results: Vec<(String, AlignmentStats)> = {
-                    let mut ctx = rammap::align::extend::AlignmentContext::new();
-                    let mut map_ctx = rammap::align::map::MapContext::new();
+                    let mut ctx = bandmap::align::extend::AlignmentContext::new();
+                    let mut map_ctx = bandmap::align::map::MapContext::new();
                     chunk_data.iter().map(|frag| {
                         align_fragment(opt, mi, frag, &mut ctx, &mut map_ctx, junc_db.as_ref(), jump_db.as_ref(), out_cfg)
                     }).collect()
@@ -1527,11 +1527,11 @@ fn map_one_part(
                     if chunk_data.is_empty() { break; }
 
                     let results: Vec<(String, AlignmentStats)> = chunk_data.par_iter().map_init(
-                        || (rammap::align::extend::AlignmentContext::new(), rammap::align::map::MapContext::new()),
+                        || (bandmap::align::extend::AlignmentContext::new(), bandmap::align::map::MapContext::new()),
                         |(ctx, map_ctx), (qname, qseq, qual, comment)| {
                             let ri = ReadInfo { qname, qseq, qual: qual.as_deref(), comment: comment.as_deref(), n_seg: 1, seg_idx: 0 };
                             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                rammap::align::pipeline::align_and_format_query(
+                                bandmap::align::pipeline::align_and_format_query(
                                     opt, mi, &ri, ctx, map_ctx, junc_db.as_ref(),
                                     jump_db.as_ref(), out_cfg,
                                 )
@@ -1577,11 +1577,11 @@ fn map_one_part(
                 if chunk_data.is_empty() { break; }
 
                 let results: Vec<(String, AlignmentStats)> = {
-                    let mut ctx = rammap::align::extend::AlignmentContext::new();
-                    let mut map_ctx = rammap::align::map::MapContext::new();
+                    let mut ctx = bandmap::align::extend::AlignmentContext::new();
+                    let mut map_ctx = bandmap::align::map::MapContext::new();
                     chunk_data.iter().map(|(qname, qseq, qual, comment)| {
                         let ri = ReadInfo { qname, qseq, qual: qual.as_deref(), comment: comment.as_deref(), n_seg: 1, seg_idx: 0 };
-                         rammap::align::pipeline::align_and_format_query(
+                         bandmap::align::pipeline::align_and_format_query(
                             opt, mi, &ri, &mut ctx, &mut map_ctx, junc_db.as_ref(),
                             jump_db.as_ref(), out_cfg,
                         )
@@ -1609,9 +1609,9 @@ fn map_one_part_split(
     part_number: usize,  // 1-based
     split_writer: &mut std::io::BufWriter<std::fs::File>,
 ) -> anyhow::Result<AlignmentStats> {
-    use rammap::align::pipeline::{process_query, process_query_from_regs};
-    use rammap::align::map::{MapContext, map_query_multi};
-    use rammap::align::extend::rev_comp;
+    use bandmap::align::pipeline::{process_query, process_query_from_regs};
+    use bandmap::align::map::{MapContext, map_query_multi};
+    use bandmap::align::extend::rev_comp;
     let mid_occ_frac = run.mid_occ_frac;
     let cli = run.cli;
     let query2_path = run.query2_path;
@@ -1671,11 +1671,11 @@ fn map_one_part_split(
         return Ok(AlignmentStats::default());
     }
 
-    let reader = rammap::fasta::open(query_path)
+    let reader = bandmap::fasta::open(query_path)
         .map_err(|e| anyhow::anyhow!("Error reading query: {}", e))?;
     let reader2 = if two_file_pe {
         let q2 = query2_path.unwrap();
-        Some(rammap::fasta::open(q2)
+        Some(bandmap::fasta::open(q2)
             .map_err(|e| anyhow::anyhow!("Error reading query2: {}", e))?)
     } else {
         None
@@ -1691,7 +1691,7 @@ fn map_one_part_split(
     let flip_r2 = pe_ori & 1 != 0;
 
     if pe_mode {
-        let mut ctx = rammap::align::extend::AlignmentContext::new();
+        let mut ctx = bandmap::align::extend::AlignmentContext::new();
         let mut map_ctx = MapContext::new();
 
         loop {
@@ -1760,7 +1760,7 @@ fn map_one_part_split(
         }
     } else {
         // Single-end split write
-        let mut ctx = rammap::align::extend::AlignmentContext::new();
+        let mut ctx = bandmap::align::extend::AlignmentContext::new();
         let mut map_ctx = MapContext::new();
 
         loop {
@@ -1781,7 +1781,7 @@ fn map_one_part_split(
                 let is_splice = opt.flags.contains(AlignFlags::SPLICE);
                 if is_splice {
                     for r in pq.results.iter_mut() {
-                        rammap::align::jump::jump_split(mi, opt, out_cfg, qseq.len(), &qseq, r, jdb);
+                        bandmap::align::jump::jump_split(mi, opt, out_cfg, qseq.len(), &qseq, r, jdb);
                     }
                 }
             }

@@ -100,7 +100,7 @@
 
 <header>
   <h1>Canonical Form（规范形）详解</h1>
-  <p class="subtitle">为什么比对工具只查一次 hash 就能同时找到正、反链的匹配？以 rammap / minimap2 为例</p>
+  <p class="subtitle">为什么比对工具只查一次 hash 就能同时找到正、反链的匹配？以 bandmap / minimap2 为例</p>
 </header>
 
 <nav class="toc">
@@ -111,7 +111,7 @@
   <a href="#s4">4. 为什么有效：等价类与确定性代表</a>
   <a href="#s5">5. 交互式演示</a>
   <a href="#s6">6. 代价与额外收获：strand bit</a>
-  <a href="#s7">7. 在 rammap / minimap2 中的完整落地</a>
+  <a href="#s7">7. 在 bandmap / minimap2 中的完整落地</a>
   <a href="#s8">8. 常见疑问</a>
 </nav>
 
@@ -126,7 +126,7 @@
   <li>读它的互补链（等价于把 <code>S</code> 做<strong>反向互补</strong>，Reverse Complement，记作 <code>RC(S)</code>）</li>
 </ul>
 <p>
-  这两种写法代表<strong>同一份序列内容</strong>。在比对工具（minimap2、rammap 等）的世界里，query read
+  这两种写法代表<strong>同一份序列内容</strong>。在比对工具（minimap2、bandmap 等）的世界里，query read
   可能来自参考基因组任意一条链、任意方向——你事先不知道方向。
 </p>
 
@@ -178,7 +178,7 @@
   <strong>Canonical form（规范形）</strong>：对 {<code>S</code>, <code>RC(S)</code>} 这一对序列
   （它们代表同一内容），用一条<strong>确定性规则</strong>选出唯一代表，然后<strong>只存、只查这个代表</strong>。
 </p>
-<p>最常用的规则（minimap2 / rammap 采用的）：取字典序较小的那个。</p>
+<p>最常用的规则（minimap2 / bandmap 采用的）：取字典序较小的那个。</p>
 
 <pre><code>canon(S) = min(S, RC(S))     // 字典序比较，按碱基编码 A&lt;C&lt;G&lt;T
 
@@ -344,8 +344,8 @@ function runMatch(){
 </p>
 
 <!-- ============ 7 ============ -->
-<h2 id="s7">7. 在 rammap / minimap2 中的完整落地</h2>
-<p>把前面所有环节串起来，就是 rammap seeding 的完整数据流：</p>
+<h2 id="s7">7. 在 bandmap / minimap2 中的完整落地</h2>
+<p>把前面所有环节串起来，就是 bandmap seeding 的完整数据流：</p>
 
 <table>
   <tr><th class="zh">阶段</th><th class="zh">做什么</th><th>代码位置</th></tr>
@@ -412,7 +412,7 @@ function runMatch(){
 <p>
   minimap2 处理 mRNA 时用 <code>--splice</code>，原理相同：仍需处理两个方向的匹配
   （转录本可能来自任一条链），canonical minimizer 一样适用；差别在下游
-  （剪接位点的 gap 罚分等）。此外 rammap 还有一个 <code>QSTRAND</code> 模式
+  （剪接位点的 gap 罚分等）。此外 bandmap 还有一个 <code>QSTRAND</code> 模式
   （<code>seed.rs:403-409</code>）：保持 query 坐标不反转、改为反转 reference 坐标，
   用于需要保留 query 原始方向的短读场景——变的是"反转谁"，不变的是 canonical 化本身。
 </p>
@@ -427,7 +427,7 @@ function runMatch(){
 </div>
 
 <footer>
-  rammap 源码导读系列 · 涉及文件：rammap-core/src/align/{sketch.rs, seed.rs, sort.rs, chain.rs, map.rs}
+  bandmap 源码导读系列 · 涉及文件：bandmap-core/src/align/{sketch.rs, seed.rs, sort.rs, chain.rs, map.rs}
 </footer>
 
 </div>

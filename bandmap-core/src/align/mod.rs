@@ -1,4 +1,4 @@
-//! # rammap alignment engine
+//! # bandmap alignment engine
 //!
 //! Minimap2-compatible sequence alignment pipeline producing byte-identical output.
 //!

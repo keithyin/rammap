@@ -1,0 +1,224 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # 失败后不需要删 tag 重打：到 Actions 页面选中该 tag 手动重跑即可。
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 同一 tag 的发布串行执行，不互相取消，避免并发写同一个 Release。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 直接复用 ci.yml，tag 发布前必须先通过同一套构建/测试/lint。
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  verify:
+    name: Verify tag matches workspace version
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Must be triggered on a version tag
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *)
+              echo "::error::请在 Actions 页面选择 v* tag 作为 ref 运行（当前为 $GITHUB_REF）"
+              exit 1
+              ;;
+          esac
+
+      - name: Tag must match workspace version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          # workspace 统一版本定义在根 Cargo.toml 的 [workspace.package]，
+          # 也是文件中第一个以 version 开头的行。
+          version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          echo "tag=$tag version=$version"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match workspace version ${version}"
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: [ci, verify]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # SIMD 运行时自动分发，无编译期平台限制，可覆盖全部主流目标。
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Cache cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Run tests
+        run: cargo test --locked --workspace --release
+
+      - name: Build release binary
+        run: cargo build --locked --release --target ${{ matrix.target }} -p bandmap
+
+      - name: Package (unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../bandmap-${{ matrix.target }}.tar.gz bandmap
+          cd ../../..
+          shasum -a 256 bandmap-${{ matrix.target }}.tar.gz > bandmap-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Package (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/${{ matrix.target }}/release/bandmap.exe -DestinationPath bandmap-${{ matrix.target }}.zip
+          (Get-FileHash bandmap-${{ matrix.target }}.zip -Algorithm SHA256).Hash.ToLower() | Out-File bandmap-${{ matrix.target }}.zip.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandmap-${{ matrix.target }}
+          path: |
+            bandmap-${{ matrix.target }}.tar.gz*
+            bandmap-${{ matrix.target }}.zip*
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 显式指定 tag，重跑时会更新已有 Release 而不是新建
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*
+
+  crates-io:
+    name: Publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # workspace 双 crate，依赖方向为 bandmap → bandmap-core。
+      # 必须先发 bandmap-core 再发 bandmap（发布后清单中的依赖需在 registry 可解析），
+      # 因此在同一个 job 内按顺序处理两个 crate。
+      - name: Check whether this version is already on crates.io
+        id: check
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          for pair in "bandmap-core:core_published" "bandmap:cli_published"; do
+            crate="${pair%%:*}"
+            key="${pair##*:}"
+            code="$(curl -s -o /dev/null -w '%{http_code}' -A 'bandmap-release-workflow' \
+              "https://crates.io/api/v1/crates/${crate}/${version}")"
+            echo "crates.io ${crate}@${version} -> HTTP ${code}"
+            if [ "$code" = "200" ]; then
+              echo "${key}=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::${crate} ${version} 已发布过，跳过 cargo publish"
+            else
+              echo "${key}=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+      # Dry run 只针对 bandmap-core：cargo publish --dry-run -p bandmap（CLI）
+      # 需要在 registry 上解析 bandmap-core 依赖，core 未发布前（首个版本）会失败。
+      # CLI 的 dry-run 在发布 core 之后与正式 publish 一起进行。
+      - name: Dry run bandmap-core
+        if: steps.check.outputs.core_published == 'false'
+        run: cargo publish --locked --dry-run -p bandmap-core
+
+      - name: Publish bandmap-core
+        if: steps.check.outputs.core_published == 'false'
+        run: |
+          for i in 1 2 3; do
+            if cargo publish --locked -p bandmap-core; then
+              echo "published on attempt $i"
+              exit 0
+            fi
+            echo "::warning::publish attempt $i failed, retrying in 30s"
+            sleep 30
+          done
+          echo "::error::cargo publish -p bandmap-core failed after 3 attempts"
+          exit 1
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Dry run and publish bandmap
+        if: steps.check.outputs.cli_published == 'false'
+        # bandmap-core 刚发布后，crates.io 索引可能尚未同步（依赖无法解析），
+        # 带重试避免偶发 "failed to select a version" 失败。
+        run: |
+          for i in 1 2 3 4 5; do
+            if cargo publish --locked -p bandmap; then
+              echo "published on attempt $i"
+              exit 0
+            fi
+            echo "::warning::publish attempt $i failed (registry index may lag), retrying in 30s"
+            sleep 30
+          done
+          echo "::error::cargo publish -p bandmap failed after 5 attempts"
+          exit 1
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

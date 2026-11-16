@@ -392,7 +392,7 @@ impl Index {
     /// Peek at a file's leading 4 bytes to detect a binary index (RMMI or minimap2
     /// `.mmi`), independent of file extension. Callers deciding whether to load a
     /// pre-built index or build a new one from a sequence file should not rely on
-    /// extension alone: a real minimap2/rammap index saved under a non-standard name
+    /// extension alone: a real minimap2/bandmap index saved under a non-standard name
     /// (e.g. `.mm2` instead of `.mmi`) is otherwise silently misread as sequence
     /// input, producing a bogus index built from the raw index bytes with no error.
     /// Returns false on any read error, or for the legacy no-magic bincode format
@@ -422,7 +422,7 @@ impl Index {
         }
 
         let idx: Self = if &magic == RMMI_MAGIC {
-            // rammap format: magic already consumed, deserialize the rest
+            // bandmap format: magic already consumed, deserialize the rest
             bincode::deserialize_from(reader)
                 .map_err(io::Error::other)?
         } else if &magic == Self::MINIMAP2_INDEX_MAGIC {

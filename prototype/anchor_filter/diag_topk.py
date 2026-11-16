@@ -8,7 +8,7 @@
   ④ 只保留入选桶（±neighbor 邻桶）内的 anchor
   ⑤ 照常 radix sort → DP 链化
 
-DP chaining 忠实移植 rammap-core/src/align/chain.rs 的 scalar 版本：
+DP chaining 忠实移植 bandmap-core/src/align/chain.rs 的 scalar 版本：
 compute_chain_score、visited/skip-break、backtrack(max_drop)。
 省略了 best_anchor_idx 二次检查（原型只关心过滤效果，不影响结论方向）。
 

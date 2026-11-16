@@ -1,6 +1,6 @@
 # Alignment validation and performance
 
-rammap 1.0.0 vs minimap2 v2.31
+bandmap 1.0.0 vs minimap2 v2.31
 
 ## System
 
@@ -37,8 +37,8 @@ direct-RNA reference run for ONT's RNA004 chemistry.
 
 ## Performance Comparison (8 Threads)
 
-CPU time, wall time, and peak RSS for rammap (rm) vs minimap2 (mm2). **Bold**
-marks the better outcome per metric (lower is better). In all cases, rammap
+CPU time, wall time, and peak RSS for bandmap (rm) vs minimap2 (mm2). **Bold**
+marks the better outcome per metric (lower is better). In all cases, bandmap
 produces identical alignment output to minimap2 (with the exception of SAM
 headers including the tool name itself).
 

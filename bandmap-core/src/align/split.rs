@@ -205,7 +205,7 @@ pub fn merge_split_results(
         }
         let version = env!("CARGO_PKG_VERSION");
         let cmd_line = std::env::args().collect::<Vec<String>>().join(" ");
-        writeln!(handle, "@PG\tID:rammap\tPN:rammap\tVN:{}\tCL:{}", version, cmd_line)?;
+        writeln!(handle, "@PG\tID:bandmap\tPN:bandmap\tVN:{}\tCL:{}", version, cmd_line)?;
         if let Some(rg_line) = sam_rg {
             let expanded = rg_line.replace("\\t", "\t");
             writeln!(handle, "{}", expanded)?;
