@@ -135,6 +135,7 @@ mod tests {
             max_chain_iter: 5000, chn_pen_gap: 1.0, chn_pen_skip: 0.05,
             chain_gap_scale: 0.8, rmq_rescue_size: 1000, rmq_rescue_ratio: 0.1,
             rmq_inner_dist: 1000, rmq_size_cap: 100000,
+            diag_filter: crate::align::diag_filter::DiagFilterParams::default(),
         }
     }
 

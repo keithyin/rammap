@@ -557,6 +557,7 @@ mod tests {
             rmq_rescue_ratio: 0.1,
             rmq_inner_dist: 1000,
             rmq_size_cap: 100000,
+            diag_filter: crate::align::diag_filter::DiagFilterParams::default(),
         };
         let mut bufs = ChainingBuffers::new();
         let (u, _chains) = chain_anchors(

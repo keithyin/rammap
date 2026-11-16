@@ -103,6 +103,22 @@ struct AlignArgs {
     #[arg(long)]
     pub chain_skip_scale: Option<f32>,
 
+    /// Enable diagonal histogram top-K anchor filtering before chaining
+    #[arg(long)]
+    pub diag_filter: bool,
+
+    /// Diagonal filter bucket width B in bp (with --diag-filter)
+    #[arg(long, default_value_t = 100)]
+    pub diag_bucket_size: i64,
+
+    /// Diagonal filter: keep anchors in the top K buckets per ref/strand (with --diag-filter)
+    #[arg(long, default_value_t = 2)]
+    pub diag_topk: usize,
+
+    /// Diagonal filter: also keep +-INT neighboring buckets (with --diag-filter)
+    #[arg(long, default_value_t = 1)]
+    pub diag_neighbor: i64,
+
     /// Filter out top FLOAT fraction of repetitive minimizers (>=1 sets integer count)
     #[arg(short = 'f', long)]
     pub mid_occ_frac: Option<f32>,
@@ -618,6 +634,10 @@ fn run(cli: AlignArgs) -> anyhow::Result<()> {
     if let Some(v) = cli.end_seed_pen { opt.alignment.anchor_ext_shift = v; }
     if let Some(v) = cli.max_chain_skip { opt.chaining.max_chain_skip = v; }
     if let Some(v) = cli.max_chain_iter { opt.chaining.max_chain_iter = v; }
+    opt.chaining.diag_filter.enabled = cli.diag_filter;
+    opt.chaining.diag_filter.bucket_size = cli.diag_bucket_size;
+    opt.chaining.diag_filter.topk = cli.diag_topk;
+    opt.chaining.diag_filter.neighbor = cli.diag_neighbor;
     if let Some(v) = cli.max_clip_ratio { opt.alignment.max_clip_ratio = v; }
     if let Some(v) = cli.mask_level { opt.filtering.mask_level = v; }
     if let Some(v) = cli.mask_len { opt.filtering.mask_len = v; }

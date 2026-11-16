@@ -29,6 +29,7 @@ pub fn print_post_chain_breakdown() {
     eprintln!("-----------------------------");
 }
 use crate::align::sketch::{sketch_sequence, sketch_sequence_append, Minimizer};
+use crate::align::diag_filter::{filter_anchors_diagonal, DiagFilterParams};
 use crate::align::index::Index;
 use crate::align::chain::chain_anchors;
 #[cfg(feature = "parallel")]
@@ -117,6 +118,8 @@ pub struct ChainingParams {
     pub rmq_rescue_ratio: f32,
     pub rmq_inner_dist: i32,
     pub rmq_size_cap: i32,
+    /// Diagonal histogram top-K anchor filter (no-op unless enabled).
+    pub diag_filter: DiagFilterParams,
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +213,7 @@ impl Default for MapOptions {
                 rmq_rescue_ratio: 0.1,
                 rmq_inner_dist: 1000,
                 rmq_size_cap: 100000,
+                diag_filter: DiagFilterParams::default(),
             },
             scoring: ScoringParams {
                 match_score: 2,
@@ -1005,6 +1009,9 @@ pub fn map_query_multi(
     stats.t_seed = t1.elapsed();
     stats.n_anchors = ctx.anchors.len();
 
+    // Diagonal histogram top-K anchor filter (--diag-filter; no-op unless enabled).
+    filter_anchors_diagonal(&mut ctx.anchors, &opt.chaining.diag_filter);
+
     let t2 = Instant::now();
 
     // Compute max chaining gaps.
@@ -1310,6 +1317,9 @@ pub fn map_query(
     };
     stats.t_seed = t1.elapsed();
     stats.n_anchors = ctx.anchors.len();
+
+    // Diagonal histogram top-K anchor filter (--diag-filter; no-op unless enabled).
+    filter_anchors_diagonal(&mut ctx.anchors, &opt.chaining.diag_filter);
 
     let t2 = Instant::now();
 

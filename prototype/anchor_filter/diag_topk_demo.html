@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>对角线直方图 top-K 过滤 · 均匀正方形散点演示</title>
+<style>
+  :root {
+    --bg: #fafafa; --panel: #ffffff; --ink: #1f2430; --muted: #6b7280;
+    --accent: #e8590c; --accent-soft: #ffd8a8; --drop: #c9ced6;
+    --true: #1971c2; --line: #e5e7eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--ink);
+    font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+  .wrap { max-width: 1160px; margin: 0 auto; }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 18px 28px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 18px; margin-bottom: 16px;
+  }
+  .ctrl { display: flex; align-items: center; gap: 8px; }
+  .ctrl label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .ctrl b { min-width: 2.2em; text-align: center; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 120px; accent-color: var(--accent); }
+  button {
+    border: 1px solid var(--line); background: var(--panel); border-radius: 8px;
+    padding: 6px 14px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .panels { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px 10px;
+  }
+  .panel h2 { font-size: 14px; margin: 0 0 2px; }
+  .panel .desc { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+  canvas { width: 100%; display: block; }
+  .stats {
+    margin-top: 12px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 18px; font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stats span { margin-right: 22px; white-space: nowrap; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>对角线直方图 top-K 过滤：均匀正方形散点会怎样？</h1>
+  <p class="sub">
+    anchor 均匀散布在正方形 [r0, r0+L] × [q0, q0+L] 内（无真实信号）。d = r − q 的边际分布是以对角线
+    d0 = r0 − q0 为峰的<b>三角形</b>——直方图会隆起，但峰顶平坦，top-1 常偏移 ±1 桶，K 的额外名额会被随机桶浪费。
+  </p>
+
+  <div class="controls">
+    <div class="ctrl"><button id="regen">↻ 换一组随机数 (seed=<span id="seedLabel">42</span>)</button></div>
+    <div class="ctrl"><label>K (取计数前几的桶)</label><input type="range" id="K" min="1" max="5" value="1"><b id="Kv">1</b></div>
+    <div class="ctrl"><label>neighbor (±邻桶)</label><input type="range" id="NB" min="0" max="3" value="1"><b id="NBv">1</b></div>
+    <div class="ctrl"><label>B (桶宽 bp)</label><input type="range" id="B" min="50" max="500" step="50" value="100"><b id="Bv">100</b></div>
+    <div class="ctrl"><label>N (anchor 数)</label><input type="range" id="N" min="1000" max="20000" step="1000" value="5000"><b id="Nv">5000</b></div>
+  </div>
+
+  <div class="panels">
+    <div class="panel">
+      <h2>① anchor 散点 (q, r) 空间</h2>
+      <p class="desc">灰色 = 被过滤掉的 anchor；橙色 = 入选桶(±neighbor)内保留的 anchor；蓝虚线 = 正方形主对角线 d0；橙色斜带 = 入选桶覆盖的 d 区间。</p>
+      <canvas id="scatter"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--drop)"></i>被过滤</span>
+        <span><i style="background:var(--accent)"></i>保留</span>
+        <span><i style="background:var(--true)"></i>真对角线 d0</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>② 桶计数直方图 (d = r − q // B)</h2>
+      <p class="desc">深橙 = top-K 桶，浅橙 = ±neighbor 后实际保留的桶；蓝虚线 = d0（真对角线）所在位置。注意三角形峰顶附近各桶计数差异仅有 ~1σ。</p>
+      <canvas id="hist"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>top-K 桶</span>
+        <span><i style="background:var(--accent-soft)"></i>邻桶(保留)</span>
+        <span><i style="background:#adb5bd"></i>未入选</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+</div>
+
+<script>
+"use strict";
+// ---------- 参数 ----------
+const R0 = 5000, Q0 = 3000, L = 2000;   // 正方形: r∈[R0,R0+L], q∈[Q0,Q0+L]
+const D0 = R0 - Q0;                      // 真对角线 d0 = 2000
+const NEAR = 150;                        // “对角线附近”判定半径
+
+// mulberry32 PRNG（与 python random 不同源，但现象一致）
+function mulberry32(a) {
+  return function() {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+let seed = 42;
+function genAnchors(sd, n) {
+  const rnd = mulberry32(sd), out = [];
+  for (let i = 0; i < n; i++)
+    out.push({ r: R0 + Math.floor(rnd() * L), q: Q0 + Math.floor(rnd() * L) });
+  return out;
+}
+
+// ---------- 过滤逻辑（与 diag_topk.py 的 diagonal_filter 一致）----------
+function filter(anchors, B, K, nb) {
+  const counts = new Map();
+  for (const a of anchors) {
+    const b = Math.floor((a.r - a.q) / B);
+    counts.set(b, (counts.get(b) || 0) + 1);
+  }
+  const chosen = [...counts.entries()]
+    .sort((x, y) => y[1] - x[1] || x[0] - y[0]).slice(0, K).map(e => e[0]);
+  const sel = new Set();
+  for (const b of chosen) for (let t = b - nb; t <= b + nb; t++) sel.add(t);
+  const kept = anchors.filter(a => sel.has(Math.floor((a.r - a.q) / B)));
+  return { counts, chosen, sel, kept };
+}
+
+// ---------- 画布工具 ----------
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+function frame(ctx, x, y, w, h, x0, x1, y0, y1, xTicks, yTicks, xLab, yLab) {
+  ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, w, h);
+  ctx.fillStyle = "#6b7280"; ctx.font = "11px sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (const t of xTicks) {
+    const px = x + (t - x0) / (x1 - x0) * w;
+    ctx.fillText(xLab(t), px, y + h + 4);
+    ctx.strokeStyle = "#f1f3f5";
+    ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px, y + h); ctx.stroke();
+  }
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const t of yTicks) {
+    const py = y + h - (t - y0) / (y1 - y0) * h;
+    ctx.fillText(yLab(t), x - 6, py);
+    ctx.strokeStyle = "#f1f3f5";
+    ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x + w, py); ctx.stroke();
+  }
+}
+
+// ---------- 散点图 ----------
+function drawScatter(anchors, res, B) {
+  const cv = document.getElementById("scatter");
+  cv.style.height = "440px";
+  const { ctx, w, h } = setupCanvas(cv);
+  const m = { l: 56, r: 14, t: 12, b: 40 };
+  const pw = w - m.l - m.r, ph = h - m.t - m.b;
+  const q0 = Q0 - 100, q1 = Q0 + L + 100, r0 = R0 - 100, r1 = R0 + L + 100;
+  const X = q => m.l + (q - q0) / (q1 - q0) * pw;
+  const Y = r => m.t + ph - (r - r0) / (r1 - r0) * ph;
+
+  // 入选桶的斜带（d ∈ [bB, (b+1)B)）
+  const stripMin = q0, stripMax = q1;
+  for (const b of res.sel) {
+    const dLo = b * B, dHi = (b + 1) * B;
+    // 区域: r - q ∈ [dLo, dHi) → 画成半透明多边形（用闭区间近似）
+    ctx.beginPath();
+    ctx.moveTo(X(stripMin), Y(stripMin + dHi));
+    ctx.lineTo(X(Math.min(stripMax, stripMin + dHi + L)), Y(Math.min(stripMax, stripMin + dHi + L)));
+    ctx.lineTo(X(stripMax), Y(stripMax + dLo));
+    ctx.lineTo(X(Math.max(stripMin, stripMax + dLo - L)), Y(Math.max(stripMin, stripMax + dLo - L)));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(232,89,12,0.08)";
+    ctx.fill();
+  }
+
+  // 散点
+  for (const a of anchors) {
+    const inSel = res.sel.has(Math.floor((a.r - a.q) / B));
+    ctx.fillStyle = inSel ? "rgba(232,89,12,0.75)" : "rgba(173,181,189,0.35)";
+    ctx.fillRect(X(a.q) - 1, Y(a.r) - 1, 2.2, 2.2);
+  }
+
+  // 正方形边框
+  ctx.strokeStyle = "#495057"; ctx.lineWidth = 1.2;
+  ctx.strokeRect(X(Q0), Y(R0 + L), L / (q1 - q0) * pw, L / (r1 - r0) * ph);
+
+  // 真对角线 r = q + d0
+  ctx.setLineDash([6, 4]); ctx.strokeStyle = "#1971c2"; ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(X(q0), Y(Math.min(r1, q0 + D0)));
+  ctx.lineTo(X(Math.min(q1, r1 - D0)), Y(Math.min(r1, q1 + D0)));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#1971c2"; ctx.font = "12px sans-serif";
+  ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+  ctx.fillText("d0 = r − q = 2000 (真对角线)", X(q0) + 6, Y(q0 + D0) - 6);
+
+  frame(ctx, m.l, m.t, pw, ph, q0, q1, r0, r1,
+    [Q0, Q0 + L / 2, Q0 + L], [R0, R0 + L / 2, R0 + L],
+    t => "q=" + t, t => "r=" + t);
+}
+
+// ---------- 直方图 ----------
+function drawHist(res, B, K) {
+  const cv = document.getElementById("hist");
+  cv.style.height = "440px";
+  const { ctx, w, h } = setupCanvas(cv);
+  const m = { l: 56, r: 14, t: 12, b: 40 };
+  const pw = w - m.l - m.r, ph = h - m.t - m.b;
+
+  const bs = [...res.counts.keys()];
+  const bMin = Math.min(...bs) - 1, bMax = Math.max(...bs) + 1;
+  const cMax = Math.max(...res.counts.values()) * 1.12;
+  const chosenSet = new Set(res.chosen);
+  const bw = pw / (bMax - bMin + 1);
+
+  for (const [b, c] of res.counts) {
+    const px = m.l + (b - bMin) * bw;
+    const bh = c / cMax * ph;
+    ctx.fillStyle = chosenSet.has(b) ? "#e8590c"
+                  : res.sel.has(b) ? "#ffd8a8" : "#adb5bd";
+    ctx.fillRect(px + 1, m.t + ph - bh, bw - 2, bh);
+    // 桶编号（每隔几个标一个）
+    if ((b - bMin) % Math.ceil((bMax - bMin) / 12) === 0) {
+      ctx.fillStyle = "#6b7280"; ctx.font = "11px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.fillText(b, px + bw / 2, m.t + ph + 4);
+    }
+  }
+
+  frame(ctx, m.l, m.t, pw, ph, 0, 1, 0, cMax, [], [0, Math.round(cMax / 2), Math.round(cMax)],
+    () => "", t => String(t));
+
+  // d0 虚线（落在桶边界 d0=2000 → 桶 19/20 之间）
+  const px0 = m.l + (D0 / B - bMin) * bw;
+  ctx.setLineDash([6, 4]); ctx.strokeStyle = "#1971c2"; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.moveTo(px0, m.t); ctx.lineTo(px0, m.t + ph); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#1971c2"; ctx.font = "12px sans-serif";
+  ctx.textAlign = px0 > m.l + pw / 2 ? "right" : "left"; ctx.textBaseline = "top";
+  ctx.fillText("d0=2000", px0 + (px0 > m.l + pw / 2 ? -6 : 6), m.t + 4);
+
+  // 轴标签
+  ctx.fillStyle = "#6b7280"; ctx.font = "12px sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  ctx.fillText("桶编号 b = d // B   (d = r − q)", m.l + pw / 2, h - 4);
+  ctx.save();
+  ctx.translate(14, m.t + ph / 2); ctx.rotate(-Math.PI / 2);
+  ctx.textBaseline = "middle"; ctx.fillText("anchor 计数", 0, 0);
+  ctx.restore();
+}
+
+// ---------- 主渲染 ----------
+function render() {
+  const K = +document.getElementById("K").value;
+  const nb = +document.getElementById("NB").value;
+  const B = +document.getElementById("B").value;
+  const N = +document.getElementById("N").value;
+  document.getElementById("Kv").textContent = K;
+  document.getElementById("NBv").textContent = nb;
+  document.getElementById("Bv").textContent = B;
+  document.getElementById("Nv").textContent = N;
+  document.getElementById("seedLabel").textContent = seed;
+
+  const anchors = genAnchors(seed, N);
+  const res = filter(anchors, B, K, nb);
+  drawScatter(anchors, res, B);
+  drawHist(res, B, K);
+
+  const nearAll = anchors.filter(a => Math.abs(a.r - a.q - D0) <= NEAR);
+  const nearKept = res.kept.filter(a => Math.abs(a.r - a.q - D0) <= NEAR);
+  const d0Bucket = Math.floor(D0 / B);
+  const hitTop = res.chosen.some(b => Math.abs(b - d0Bucket) <= 1 + nb);
+  document.getElementById("stats").innerHTML =
+    `<span>真对角线 d0=${D0}，所在桶 <b>${d0Bucket}</b></span>` +
+    `<span>top-K 桶: <b>[${res.chosen.join(", ")}]</b>${res.chosen.includes(d0Bucket) ? " ✓含d0桶" : (hitTop ? " (偏移1桶,靠neighbor覆盖)" : " ✗未覆盖d0桶")}</span>` +
+    `<span>保留 ${res.kept.length}/${N} (${(100 * res.kept.length / N).toFixed(1)}%)</span>` +
+    `<span>对角线±${NEAR}bp 保留率 <b>${nearKept.length}/${nearAll.length} (${nearAll.length ? (100 * nearKept.length / nearAll.length).toFixed(0) : 0}%)</b></span>`;
+}
+
+// ---------- 事件 ----------
+document.getElementById("regen").addEventListener("click", () => { seed = (seed * 1103515245 + 12345) % 2147483647; render(); });
+for (const id of ["K", "NB", "B", "N"])
+  document.getElementById(id).addEventListener("input", render);
+window.addEventListener("resize", render);
+render();
+</script>
+</body>
+</html>
