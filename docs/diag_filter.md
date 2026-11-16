@@ -22,8 +22,8 @@
 示例：
 
 ```bash
-# 默认参数启用过滤
-bandmap -x map-hifi ref.fa reads.fq > out.paf
+# 显式启用过滤（默认参数：bucket_size=100, topk=2, neighbor=±1）
+bandmap --diag-filter -x map-hifi ref.fa reads.fq > out.paf
 
 # 调参：桶宽 500，保留 top-3 桶，邻桶范围 ±2
 bandmap --diag-filter --diag-bucket-size 500 --diag-topk 3 --diag-neighbor 2 ref.fa reads.fq > out.paf
@@ -54,8 +54,10 @@ bandmap --diag-filter --diag-bucket-size 500 --diag-topk 3 --diag-neighbor 2 ref
 
 ```rust
 use bandmap::align::diag_filter::{filter_anchors_diagonal, DiagFilterParams};
+// anchors: Vec<Minimizer>，由 collect_seed_hits 等 seed 收集路径产出（按 x 排序）
+let mut anchors = collect_seed_hits(...);
 
-let mut p = DiagFilterParams {
+let p = DiagFilterParams {
     enabled: true,
     bucket_size: 100, // 对角线分桶宽度 B（bp）
     topk: 2,          // 每个 ref/strand 分组保留的 top-K 桶数
@@ -91,10 +93,11 @@ collect_seed_hits(opt, mi, ..., &mut ctx.anchors, ...);
 // Diagonal histogram top-K anchor filter (--diag-filter; no-op unless enabled).
 filter_anchors_diagonal(&mut ctx.anchors, &opt.chaining.diag_filter);
 
-let (u, chains) = chain_anchors(...) 或 chain_anchors_rmq(...);
+// 链化：按 flags 走 chain_anchors（默认 DP）或 chain_anchors_rmq（RMQ）
+let (u, chains) = chain_anchors(...);
 ```
 
-- `map_query`（多 query 累计路径）与 `map_query_multi`（单 query 路径）均覆盖。
+- `map_query_multi`（多 query segment 合并路径，"strong pairing"，用 `qlen_sum`）与 `map_query`（单 query 路径，用 `qlen`）均覆盖。
 
 ### 不过滤的路径（设计决策）
 
