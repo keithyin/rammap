@@ -17,3 +17,6 @@ Thumbs.db
 
 # Local cargo config overrides (keep the committed .cargo/config.toml, ignore personal overrides)
 .cargo/config.local.toml
+
+/.codebuddy
+/prototype/anchor_filter/__pycache__/
