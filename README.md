@@ -1,4 +1,9 @@
 # bandmap
+[![Crates.io](https://img.shields.io/crates/v/bandmap.svg)](https://crates.io/crates/bandmap)
+[![Crates.io (core)](https://img.shields.io/crates/v/bandmap-core.svg?label=bandmap-core)](https://crates.io/crates/bandmap-core)
+[![docs.rs](https://img.shields.io/docsrs/bandmap)](https://docs.rs/bandmap)
+[![CI](https://github.com/keithyin/rammap/actions/workflows/ci.yml/badge.svg)](https://github.com/keithyin/rammap/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A pure-Rust extensible sequence aligner and mapper mirroring the interface and producing identical output to [minimap2](https://github.com/lh3/minimap2).
 
